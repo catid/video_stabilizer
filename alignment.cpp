@@ -336,7 +336,7 @@ bool VideoAligner::AlignNextFrame(
             //std::cout << "i=" << i << ": Iteration " << iter << "/" << max_iters << std::endl;
             //std::cout << "Transform: " << transform.toString() << std::endl;
 
-            uint64_t s0 = get_time_since_boot_microseconds();
+            //uint64_t s0 = get_time_since_boot_microseconds();
 
             if (!SparseICA(
                     template_image,
@@ -365,7 +365,7 @@ bool VideoAligner::AlignNextFrame(
 
             transform = delta_transform.compose(transform);
 
-            uint64_t s1 = get_time_since_boot_microseconds();
+            //uint64_t s1 = get_time_since_boot_microseconds();
             //std::cout << "Pyramid level " << i << " ICA iteration took " << (s1 - s0) / 1000.f << " milliseconds\n";
  
             //std::cout << "dt = " << dt << std::endl;

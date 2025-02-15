@@ -6,36 +6,6 @@ VideoStabilizer::VideoStabilizer()
     m_accum = SimilarityTransform(); // identity
 }
 
-cv::Mat VideoStabilizer::warpBySimilarityTransform(const cv::Mat &frame,
-                                                   const SimilarityTransform &transform)
-{
-    // Build an OpenCV 2x3 matrix for affine warp
-    // W_x = (1 + A)*x - B*y + TX
-    // W_y = B*x + (1 + A)*y + TY
-    // => 2x3 = [ (1+A), -B, TX
-    //            B,     (1+A), TY ]
-    double a11 = (1.0 + transform.A);
-    double a12 = -transform.B;
-    double a21 = transform.B;
-    double a22 = (1.0 + transform.A);
-
-    cv::Mat affine = (cv::Mat_<double>(2,3) << 
-        a11, a12, transform.TX,
-        a21, a22, transform.TY);
-
-    cv::Mat output;
-    cv::warpAffine(
-        frame,
-        output,
-        affine,
-        frame.size(),
-        cv::INTER_LINEAR,
-        cv::BORDER_CONSTANT,
-        cv::Scalar::all(0)
-    );
-    return output;
-}
-
 cv::Mat VideoStabilizer::processFrame(const cv::Mat& inputFrame)
 {
     ++m_frameIndex;
@@ -48,7 +18,7 @@ cv::Mat VideoStabilizer::processFrame(const cv::Mat& inputFrame)
     bool success = aligner.AlignNextFrame(inputFrame, transform);
     if (!success) {
         ++alignFailures;
-        std::cerr << "Frame " << m_frameIndex << ": Alignment failed # " << alignFailures << std::endl;
+        //std::cerr << "Frame " << m_frameIndex << ": Alignment failed # " << alignFailures << std::endl;
         reset = true;
         m_accum = SimilarityTransform();
     } else {

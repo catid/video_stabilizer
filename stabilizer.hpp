@@ -28,9 +28,4 @@ protected:
 
     // A small buffer to hold frames so we can output them one-frame delayed.
     std::deque<cv::Mat> m_frameBuffer;
-
-private:
-    // Warp image by a given similarity transform
-    cv::Mat warpBySimilarityTransform(const cv::Mat &frame,
-                                      const SimilarityTransform &transform);
 };

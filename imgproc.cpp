@@ -426,7 +426,7 @@ cv::Mat warpBySimilarityTransform(const cv::Mat& src, const SimilarityTransform&
     // Use the same size as the source for the output. Adjust as needed.
     cv::Size outputSize(src.cols, src.rows);
 
-    int flags = cv::INTER_LINEAR | cv::WARP_INVERSE_MAP; // Combine them with bitwise OR
+    int flags = cv::INTER_LINEAR/* | cv::WARP_INVERSE_MAP*/; // Combine them with bitwise OR
     cv::warpAffine(
         src,
         dst,
