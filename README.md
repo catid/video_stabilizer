@@ -2,7 +2,7 @@
 
 Uses method described here: https://catid.io/posts/lk40years/
 
-There are some differences and improvements, primarily I've changed how I select the sparse set of pixels to use as keypoints: Now I select about 1000 keypoints with the largest X gradient and 1000 keypoints with the largest Y gradient, basically doubling the work but the result is about 10x fewer frame alignment errors.
+There are some differences and improvements, primarily I've changed how I select the sparse set of pixels to use as keypoints: Now I select about 1000 keypoints with the largest X gradient and 1000 keypoints with the largest Y gradient, basically doubling the work but the result is about 10x fewer frame alignment errors.  My theory is that sometimes only large Y gradient pixels are selected so there is not enough X gradient information to do a good alignment.  By selecting the best pixels for x and y gradient across the whole image, it converges much more often.
 
 Phase correlation initialization is available but is disabled since it seems to make things worse (maybe a bug?)
 
