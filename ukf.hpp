@@ -29,17 +29,12 @@ private:
     double lambda_;
 
     // State vector and covariance
-    Eigen::VectorXd x_; // [r, tx, ty, rVel, txVel, tyVel]
-    Eigen::MatrixXd P_; // State covariance (6x6)
+    Eigen::VectorXd x_; // [A, B, TX, TY, vA, vB, vTX, vTY]
+    Eigen::MatrixXd P_; // State covariance (8x8)
 
     // Process and measurement noise covariances
-    Eigen::MatrixXd Q_; // (6x6)
-    Eigen::MatrixXd R_; // (3x3)
-
-    // We keep a small buffer for the one-frame delay:
-    // - store the *filtered* result for each update
-    // - next time we are asked, we return the previously stored transform
-    std::deque<SimilarityTransform> delayedOutput_;
+    Eigen::MatrixXd Q_; // (8x8)
+    Eigen::MatrixXd R_; // (4x4)
 
 private:
     // Helper: generate sigma points

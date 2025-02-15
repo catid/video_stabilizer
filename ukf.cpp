@@ -35,8 +35,6 @@ CameraMotionUKF::CameraMotionUKF()
     R_(1,1) = 1e-3;
     R_(2,2) = 1e-2;
     R_(3,3) = 1e-2;
-
-    delayedOutput_.clear();
 }
 
 //------------------------------------------------------------------------------
@@ -45,17 +43,6 @@ CameraMotionUKF::CameraMotionUKF()
 
 SimilarityTransform CameraMotionUKF::update(const SimilarityTransform &meas, bool reset)
 {
-    // 1) We want to return the *delayed* result from the *previous* update
-    //    so let's capture what we'll return *now* (i.e. from last iteration).
-    SimilarityTransform out;
-    if (!delayedOutput_.empty()) {
-        out = delayedOutput_.front();
-        delayedOutput_.pop_front();
-    } else {
-        // No previous estimate -> return identity or best guess
-        out = SimilarityTransform(); // identity
-    }
-
     // 3) If reset requested, reset the filter to the measurement
     if (reset) {
         x_(0) = meas.A;
@@ -121,7 +108,13 @@ SimilarityTransform CameraMotionUKF::update(const SimilarityTransform &meas, boo
     //   d) Transform predicted sigma points into measurement space
     std::vector<Eigen::VectorXd> Zsigma(nSigma);
     for (int i=0; i<nSigma; i++) {
-        Zsigma[i] = stateToMeasurement(sigmaPointsPred[i]); // dimension 3
+        const auto& state = sigmaPointsPred[i];
+        Eigen::VectorXd z(MEAS_DIM);
+        z(0) = state(0);
+        z(1) = state(1);
+        z(2) = state(2);
+        z(3) = state(3);
+        Zsigma[i] = z;
     }
 
     // Compute predicted measurement zPred
@@ -132,7 +125,7 @@ SimilarityTransform CameraMotionUKF::update(const SimilarityTransform &meas, boo
 
     // Compute measurement covariance S and cross-covariance Tc
     Eigen::MatrixXd S = Eigen::MatrixXd::Zero(MEAS_DIM, MEAS_DIM);
-    Eigen::MatrixXd Tc= Eigen::MatrixXd::Zero(L, MEAS_DIM);
+    Eigen::MatrixXd Tc = Eigen::MatrixXd::Zero(L, MEAS_DIM);
 
     for (int i=0; i<nSigma; i++) {
         // measurement diff
@@ -173,11 +166,8 @@ SimilarityTransform CameraMotionUKF::update(const SimilarityTransform &meas, boo
     currentFiltered.TX = x_(2);
     currentFiltered.TY = x_(3);
 
-    // 5) Push that into the queue for next iteration’s delayed output
-    delayedOutput_.push_back(currentFiltered);
-
     // 6) Return the *previous* result
-    return out;
+    return currentFiltered;
 }
 
 //------------------------------------------------------------------------------

@@ -55,7 +55,22 @@ struct SimilarityTransform {
     // We want T3 = T2( T1(p) ) => apply T1, then T2.
     SimilarityTransform compose(
         const SimilarityTransform &w2) const;
+    
 };
+
+inline SimilarityTransform difference(
+    const SimilarityTransform &observed,
+    const SimilarityTransform &expected)
+{
+    // 1. Invert the expected transform
+    SimilarityTransform invExp = expected.inverse();
+
+    // 2. "Subtract" = compose observed with the inverse of expected
+    //    but recall the signature: T1.compose(T2) = T2 o T1
+    //    so we want T_res = T_observed o T_expected^-1
+    //    => that means T_res = invExp.compose(observed).
+    return invExp.compose(observed);
+}
 
 bool ImageWarp(
     Halide::Runtime::Buffer<uint8_t>& input,

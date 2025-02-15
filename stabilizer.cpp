@@ -19,20 +19,18 @@ cv::Mat VideoStabilizer::processFrame(const cv::Mat& inputFrame)
     if (!success) {
         ++alignFailures;
         //std::cerr << "Frame " << m_frameIndex << ": Alignment failed # " << alignFailures << std::endl;
-        reset = true;
         m_accum = SimilarityTransform();
     } else {
         //std::cout << "Frame " << m_frameIndex 
         //          << ": Alignment OK => " << transform.toString() << std::endl;
-
-        // Run it through the UKF to get a *one-frame-delayed* estimate
-        // FIXME: UKF is not working properly.
-        //SimilarityTransform transformEst = ukf.update(transform, reset);
-        // (At the *very first* call, transformEst might be identity or uninitialized.)
-
-        //  => accum = accum ∘ diff
-        m_accum = m_accum.compose(transform);
     }
+
+    bool reset = !success;
+    SimilarityTransform camera_estimate = ukf.update(transform, reset);
+    auto residual = difference(transform, camera_estimate);
+
+    //  => accum = accum ∘ diff
+    m_accum = m_accum.compose(residual);
 
     // The transform we will actually apply to a frame is "accum^-1" if we want
     // to “undo” the accumulated jitter. That is, if accum is the net “jitter,”

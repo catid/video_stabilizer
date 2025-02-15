@@ -18,7 +18,6 @@ public:
 protected:
     VideoAligner       aligner;  ///< Your alignment class
     CameraMotionUKF    ukf;      ///< The Unscented Kalman Filter
-    bool               reset = true;
     int                m_frameIndex = 0;
     int alignFailures = 0;
 
