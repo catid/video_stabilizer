@@ -4,11 +4,6 @@
 
 namespace fs = std::filesystem;
 
-// Placeholder processing function
-cv::Mat processFrame(VideoStabilizer& stabilizer, const cv::Mat& inputFrame) {
-    return stabilizer.processFrame(inputFrame);
-}
-
 int main() {
     // Define input and output directories
     std::string inputDir = "../recordings";
@@ -53,8 +48,9 @@ int main() {
             std::cerr << "Warning: Unable to retrieve FPS for " << videoFile << ". Defaulting to 30 FPS." << std::endl;
             fps = 30.0; // Default FPS
         }
-        int frameWidth = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_WIDTH));
-        int frameHeight = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_HEIGHT));
+        int crop = 16;
+        int frameWidth = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_WIDTH)) - crop * 2; // Crop both edges
+        int frameHeight = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_HEIGHT)) - crop * 2; // Crop both edges
 
         int fourcc = cv::VideoWriter::fourcc('x', '2', '6', '4');
 
@@ -83,7 +79,7 @@ int main() {
         // Process each frame
         while (cap.read(frame)) {
             // Pass the frame to the processing function
-            processedFrame = processFrame(stabilizer, frame);
+            processedFrame = stabilizer.processFrame(frame, crop);
 
             // Write the processed frame to the output video
             writer.write(processedFrame);

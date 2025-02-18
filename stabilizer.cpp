@@ -6,7 +6,7 @@ VideoStabilizer::VideoStabilizer()
     m_accum = SimilarityTransform(); // identity
 }
 
-cv::Mat VideoStabilizer::processFrame(const cv::Mat& inputFrame)
+cv::Mat VideoStabilizer::processFrame(const cv::Mat& inputFrame, int crop_pixels)
 {
     ++m_frameIndex;
 
@@ -86,6 +86,16 @@ cv::Mat VideoStabilizer::processFrame(const cv::Mat& inputFrame)
 #else
     auto processedFrame = warpBySimilarityTransform(inputFrame, correction);
 #endif
+
+    if (crop_pixels > 0) {
+        cv::Rect roi(
+            crop_pixels,
+            crop_pixels,
+            processedFrame.cols - 2 * crop_pixels,
+            processedFrame.rows - 2 * crop_pixels);
+
+        processedFrame = processedFrame(roi);
+    }
 
     return processedFrame;
 }

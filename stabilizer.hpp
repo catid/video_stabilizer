@@ -13,7 +13,7 @@
 class VideoStabilizer {
 public:
     VideoStabilizer();
-    cv::Mat processFrame(const cv::Mat& inputFrame);
+    cv::Mat processFrame(const cv::Mat& inputFrame, int crop_pixels = 16);
 
 protected:
     VideoAligner       aligner;  ///< Your alignment class
