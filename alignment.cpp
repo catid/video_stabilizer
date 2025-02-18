@@ -373,6 +373,17 @@ bool VideoAligner::AlignNextFrame(
 
             // FIXME: Add check for divergence
 
+            // For top three layers:
+            if (i < 3) {
+                if (iter <= 2) {
+                    continue;
+                }
+            } else {
+                if (iter == 0) {
+                    continue;
+                }
+            }
+
             const double stop_a_thresh = 0.0005;
             const double stop_b_thresh = 0.0005;
             const double stop_tx_thresh = 0.05;
