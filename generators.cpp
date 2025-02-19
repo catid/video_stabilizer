@@ -625,46 +625,48 @@ public:
         // Boundary-condition for reading the keyframe
         Func clamped = BoundaryConditions::repeat_edge(input_keyframe);
 
+        // The selected pixel's original location:
         Expr tile_x = min(local_max(x, y, 0), input_keyframe.width() - 1);
         Expr tile_y = min(local_max(x, y, 1), input_keyframe.height() - 1);
 
-        // (orig_x, orig_y) is the pixel coordinate in "template" space
-        // that we want to warp into "keyframe" space.
         Expr orig_x = cast<float>( tile_x );
         Expr orig_y = cast<float>( tile_y );
 
-        // Apply the similarity warp
+        // Compute warped location (Wx, Wy) in the keyframe
         Expr Wx = (1.0f + A)*orig_x - B*orig_y + TX;
         Expr Wy = B*orig_x + (1.0f + A)*orig_y + TY;
 
-        // Floor and fraction
-        Expr Wx_floor = floor(Wx);
-        Expr Wy_floor = floor(Wy);
-        Expr fracX = Wx - Wx_floor;
-        Expr fracY = Wy - Wy_floor;
+        // Floor and fractional parts
+        Expr floorWx = floor(Wx);
+        Expr floorWy = floor(Wy);
+        Expr fracWx  = Wx - floorWx;
+        Expr fracWy  = Wy - floorWy;
 
-        // We can clamp indexes to avoid out-of-bounds:
-        // The boundary condition will also handle that, but for safety:
-        Expr x0 = cast<int>(Wx_floor);
-        Expr x1 = x0 + 1;
-        Expr y0 = cast<int>(Wy_floor);
-        Expr y1 = y0 + 1;
+        // A 5×5 sampling kernel using Lanczos2 in 2D
+        RDom rxy(0, 5, 0, 5, "rxy"); // kernel radius=2 => 5 taps
+        Expr rx = rxy.x - 2;        // in [-2..2]
+        Expr ry = rxy.y - 2;        // in [-2..2]
 
-        // Gather the 4 neighbors
-        Expr f00 = cast<float>( clamped(x0, y0) );
-        Expr f10 = cast<float>( clamped(x1, y0) );
-        Expr f01 = cast<float>( clamped(x0, y1) );
-        Expr f11 = cast<float>( clamped(x1, y1) );
+        // Compute 2D weights
+        Expr distx = rx - fracWx;
+        Expr disty = ry - fracWy;
+        Expr w_x   = lanczos2(distx);
+        Expr w_y   = lanczos2(disty);
+        Expr w2D   = w_x * w_y;
 
-        // Bilinear interpolation:
-        // top = f00 + fracX*(f10 - f00);
-        // bottom = f01 + fracX*(f11 - f01);
-        // final = top + fracY*(bottom - top);
-        Expr top    = f00 + fracX*(f10 - f00);
-        Expr bottom = f01 + fracX*(f11 - f01);
-        Expr bilinear = top + fracY*(bottom - top);
+        // Sample from keyframe at (floorWx+rx, floorWy+ry)
+        // with boundary checks
+        Expr sample_x = cast<int>(floorWx) + rx;
+        Expr sample_y = cast<int>(floorWy) + ry;
+        Expr val = cast<float>( clamped(sample_x, sample_y) );
 
-        Expr diff = abs(bilinear - input_template(tile_x, tile_y));
+        // Sum up w2D*val and w2D separately
+        Expr sum_num = sum(w2D * val);
+        Expr sum_den = sum(w2D);
+
+        Expr interpolated = sum_num / sum_den;
+
+        Expr diff = abs(interpolated - input_template(tile_x, tile_y));
         output(x, y) = cast<uint16_t>( clamp(diff, 0.0f, 65535.0f) );
     }
 

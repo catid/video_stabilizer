@@ -404,7 +404,7 @@ bool VideoAligner::AlignNextFrame(
                 Too low: Will iterate too many times, accumulating errors until it diverges.
                 Too high: Will iterate too few times, creating visual errors and/or diverging more.
             */
-            const double threshold = 0.02;
+            const double threshold = 0.03;
             if (displacement < threshold) {
                 break;
             }
