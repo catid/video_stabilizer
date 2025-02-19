@@ -18,7 +18,7 @@ cv::Mat VideoStabilizer::processFrame(const cv::Mat& inputFrame, int crop_pixels
     bool success = aligner.AlignNextFrame(inputFrame, transform);
     if (!success) {
         ++alignFailures;
-        //std::cerr << "Frame " << m_frameIndex << ": Alignment failed # " << alignFailures << std::endl;
+        std::cerr << "Frame " << m_frameIndex << ": Alignment failed # " << alignFailures << std::endl;
         reset = true;
         m_accum = SimilarityTransform();
     } else {

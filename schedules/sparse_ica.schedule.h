@@ -18,11 +18,15 @@ inline void apply_schedule_sparse_ica(
     using ::Halide::RVar;
     using ::Halide::TailStrategy;
     using ::Halide::Var;
-    Func output = pipeline.get_func(12);
-    Func f3 = pipeline.get_func(11);
-    Func f1 = pipeline.get_func(9);
-    Func f2 = pipeline.get_func(7);
-    Func f0 = pipeline.get_func(4);
+    Func output = pipeline.get_func(16);
+    Func f3 = pipeline.get_func(15);
+    Func f1 = pipeline.get_func(13);
+    Func sum_3 = pipeline.get_func(12);
+    Func sum_2 = pipeline.get_func(11);
+    Func f2 = pipeline.get_func(9);
+    Func f0 = pipeline.get_func(6);
+    Func sum_1 = pipeline.get_func(5);
+    Func sum = pipeline.get_func(4);
     Func repeat_edge = pipeline.get_func(2);
     Func lambda_0 = pipeline.get_func(1);
     Var c(f3.get_schedule().dims()[0].var);
@@ -30,9 +34,12 @@ inline void apply_schedule_sparse_ica(
     Var i(f1.get_schedule().dims()[0].var);
     Var ii("ii");
     Var iii("iii");
+    Var iiii("iiii");
     Var v0(output.get_schedule().dims()[0].var);
     Var v0i("v0i");
     RVar r_x(f3.update(0).get_schedule().dims()[0].var);
+    RVar rxy_x(sum_3.update(0).get_schedule().dims()[0].var);
+    RVar rxy_y(sum_3.update(0).get_schedule().dims()[1].var);
     output
         .split(v0, v0, v0i, 4, TailStrategy::ShiftInwards)
         .vectorize(v0i)
@@ -55,10 +62,36 @@ inline void apply_schedule_sparse_ica(
     f1
         .split(i, i, ii, 128, TailStrategy::GuardWithIf)
         .split(ii, ii, iii, 16, TailStrategy::ShiftInwards)
-        .unroll(ii)
+        .split(iii, iii, iiii, 4, TailStrategy::ShiftInwards)
+        .unroll(iii)
+        .vectorize(iiii)
+        .compute_root()
+        .reorder({iiii, iii, ii, i})
+        .parallel(i);
+    sum_3
+        .store_in(MemoryType::Stack)
+        .split(i, i, ii, 4, TailStrategy::RoundUp)
+        .unroll(i)
+        .vectorize(ii)
+        .compute_at(f1, ii)
+        .reorder({ii, i});
+    sum_3.update(0)
+        .split(i, i, ii, 8, TailStrategy::GuardWithIf)
+        .unroll(i)
+        .vectorize(ii)
+        .reorder({ii, i, rxy_x, rxy_y});
+    sum_2
+        .split(i, i, ii, 128, TailStrategy::GuardWithIf)
+        .split(ii, ii, iii, 4, TailStrategy::RoundUp)
         .vectorize(iii)
         .compute_root()
         .reorder({iii, ii, i})
+        .parallel(i);
+    sum_2.update(0)
+        .split(i, i, ii, 128, TailStrategy::GuardWithIf)
+        .split(ii, ii, iii, 16, TailStrategy::GuardWithIf)
+        .vectorize(iii)
+        .reorder({iii, rxy_x, rxy_y, ii, i})
         .parallel(i);
     f2
         .split(c, c, ci, 4, TailStrategy::RoundUp)
@@ -76,11 +109,32 @@ inline void apply_schedule_sparse_ica(
         .reorder({r_x});
     f0
         .split(i, i, ii, 128, TailStrategy::GuardWithIf)
-        .split(ii, ii, iii, 16, TailStrategy::ShiftInwards)
-        .unroll(ii)
+        .split(ii, ii, iii, 4, TailStrategy::ShiftInwards)
         .vectorize(iii)
         .compute_root()
         .reorder({iii, ii, i})
+        .parallel(i);
+    sum_1
+        .split(i, i, ii, 4, TailStrategy::RoundUp)
+        .vectorize(ii)
+        .compute_at(f0, i)
+        .reorder({ii, i});
+    sum_1.update(0)
+        .split(i, i, ii, 8, TailStrategy::GuardWithIf)
+        .vectorize(ii)
+        .reorder({ii, rxy_x, rxy_y, i});
+    sum
+        .split(i, i, ii, 128, TailStrategy::GuardWithIf)
+        .split(ii, ii, iii, 4, TailStrategy::RoundUp)
+        .vectorize(iii)
+        .compute_root()
+        .reorder({iii, ii, i})
+        .parallel(i);
+    sum.update(0)
+        .split(i, i, ii, 128, TailStrategy::GuardWithIf)
+        .split(ii, ii, iii, 16, TailStrategy::GuardWithIf)
+        .vectorize(iii)
+        .reorder({iii, rxy_x, rxy_y, ii, i})
         .parallel(i);
 
 }
