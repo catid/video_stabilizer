@@ -209,6 +209,8 @@ bool VideoAligner::AlignNextFrame(
         auto& grad_argmax_y = KeyframeArgMaxY[i];
         auto& template_image = ScalePyramid[NonKeyframeIndex][i];
         auto& keyframe_image = ScalePyramid[KeyframeIndex][i];
+        const int image_width = keyframe_image.width();
+        const int image_height = keyframe_image.height();
         auto& selected_pixels_x = SelectedPixelsX[i];
         auto& selected_pixels_y = SelectedPixelsY[i];
         auto& jacobian_x = KeyframeJacobianX[i];
@@ -331,7 +333,7 @@ bool VideoAligner::AlignNextFrame(
         //uint64_t t1 = get_time_since_boot_microseconds();
         //std::cout << "Pyramid level " << i << " setup took " << (t1 - t0) / 1000.f << " milliseconds\n";
 
-        const int max_iters = 16;
+        const int max_iters = 64;
         for (int iter = 0; iter < max_iters; iter++) {
             //std::cout << "i=" << i << ": Iteration " << iter << "/" << max_iters << std::endl;
             //std::cout << "Transform: " << transform.toString() << std::endl;
@@ -363,6 +365,16 @@ bool VideoAligner::AlignNextFrame(
             delta_transform.TX = dt.at<double>(2);
             delta_transform.TY = dt.at<double>(3);
 
+            Point ul0{0.f, 0.f};
+            Point ur0{image_width - 1.f, 0.f};
+            Point ll0{0.f, image_height - 1.f};
+            Point lr0{image_width - 1.f, image_height - 1.f};
+
+            ul0 = transform.warp(ul0);
+            ur0 = transform.warp(ur0);
+            ll0 = transform.warp(ll0);
+            lr0 = transform.warp(lr0);
+
             transform = delta_transform.compose(transform);
 
             //uint64_t s1 = get_time_since_boot_microseconds();
@@ -373,30 +385,31 @@ bool VideoAligner::AlignNextFrame(
 
             // FIXME: Add check for divergence
 
-            // For top three layers:
-            if (i < 3) {
-                if (iter <= 2) {
-                    continue;
-                }
-            } else {
-                if (iter == 0) {
-                    continue;
-                }
+            Point ul1{0.f, 0.f};
+            Point ur1{image_width - 1.f, 0.f};
+            Point ll1{0.f, image_height - 1.f};
+            Point lr1{image_width - 1.f, image_height - 1.f};
+
+            ul1 = transform.warp(ul1);
+            ur1 = transform.warp(ur1);
+            ll1 = transform.warp(ll1);
+            lr1 = transform.warp(lr1);
+
+            double ud = std::max(ul1.distance(ul0), ur1.distance(ur0));
+            double ld = std::max(ll1.distance(ll0), lr1.distance(lr0));
+            double displacement = std::max(ud, ld);
+
+            /*
+                There is a sweet spot for this threshold.
+                Too low: Will iterate too many times, accumulating errors until it diverges.
+                Too high: Will iterate too few times, creating visual errors and/or diverging more.
+            */
+            const double threshold = 0.03;
+            if (displacement < threshold) {
+                break;
             }
 
-            const double stop_a_thresh = 0.0005;
-            const double stop_b_thresh = 0.0005;
-            const double stop_tx_thresh = 0.05;
-            const double stop_ty_thresh = 0.05;
-
-            if (std::abs(delta_transform.A) < stop_a_thresh &&
-                std::abs(delta_transform.B) < stop_b_thresh &&
-                std::abs(delta_transform.TX) < stop_tx_thresh &&
-                std::abs(delta_transform.TY) < stop_ty_thresh)
-            {
-                //std::cout << "Converged at iteration " << iter << std::endl;
-                break;
-            } else if (iter == max_iters - 1) {
+            if (iter >= max_iters - 1) {
                 return false;
             }
         }
