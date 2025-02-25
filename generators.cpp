@@ -419,39 +419,36 @@ public:
             // The selected pixel's original location:
             Expr orig_x = cast<float>( selected_pixels_x(i, 0) );
             Expr orig_y = cast<float>( selected_pixels_x(i, 1) );
-
+            
             // Compute warped location (Wx, Wy) in the keyframe
             Expr Wx = (1.0f + A)*orig_x - B*orig_y + TX;
             Expr Wy = B*orig_x + (1.0f + A)*orig_y + TY;
-
-            // Floor and fractional parts
+            
+            // Floor/fractional parts
             Expr floorWx = floor(Wx);
             Expr floorWy = floor(Wy);
             Expr fracWx  = Wx - floorWx;
             Expr fracWy  = Wy - floorWy;
+            
+            // Precompute 1D Lanczos weights in X and Y, each 5 elements [0..4]
+            Func weight_x("weight_x"), weight_y("weight_y");
 
-            // A 5×5 sampling kernel using Lanczos2 in 2D
-            RDom rxy(0, 5, 0, 5, "rxy"); // kernel radius=2 => 5 taps
-            Expr rx = rxy.x - 2;        // in [-2..2]
-            Expr ry = rxy.y - 2;        // in [-2..2]
-
-            // Compute 2D weights
-            Expr distx = rx - fracWx;
-            Expr disty = ry - fracWy;
-            Expr w_x   = lanczos2(distx);
-            Expr w_y   = lanczos2(disty);
-            Expr w2D   = w_x * w_y;
-
-            // Sample from keyframe at (floorWx+rx, floorWy+ry)
-            // with boundary checks
-            Expr sample_x = cast<int>(floorWx) + rx;
-            Expr sample_y = cast<int>(floorWy) + ry;
-            Expr val = cast<float>( clamped(sample_x, sample_y) );
-
-            // Sum up w2D*val and w2D separately
-            Expr sum_num = sum(w2D * val);
-            Expr sum_den = sum(w2D);
-
+            // For u in [0..4], the distance is (u - 2) - fracWx in X
+            weight_x(i, u) = lanczos2(cast<float>(u - 2) - fracWx);
+            // Similarly in Y
+            weight_y(i, u) = lanczos2(cast<float>(u - 2) - fracWy);
+            
+            // Now do a small sum over tX in [0..4], tY in [0..4]
+            RDom rxy(0, 5, 0, 5, "rxy");
+            Expr w_2d = weight_x(i, rxy.x) * weight_y(i, rxy.y);
+            
+            Expr sample_x = cast<int>(floorWx) + (rxy.x - 2);
+            Expr sample_y = cast<int>(floorWy) + (rxy.y - 2);
+            Expr val      = cast<float>( clamped(sample_x, sample_y) );
+            
+            Expr sum_num  = sum(w_2d * val);
+            Expr sum_den  = sum(w_2d);
+            
             warp_pixel_x(i) = sum_num / sum_den;
         }
         {
@@ -462,39 +459,36 @@ public:
             // The selected pixel's original location:
             Expr orig_x = cast<float>( selected_pixels_y(i, 0) );
             Expr orig_y = cast<float>( selected_pixels_y(i, 1) );
-
+            
             // Compute warped location (Wx, Wy) in the keyframe
             Expr Wx = (1.0f + A)*orig_x - B*orig_y + TX;
             Expr Wy = B*orig_x + (1.0f + A)*orig_y + TY;
-
-            // Floor and fractional parts
+            
+            // Floor/fractional parts
             Expr floorWx = floor(Wx);
             Expr floorWy = floor(Wy);
             Expr fracWx  = Wx - floorWx;
             Expr fracWy  = Wy - floorWy;
-
-            // A 5×5 sampling kernel using Lanczos2 in 2D
-            RDom rxy(0, 5, 0, 5, "rxy"); // kernel radius=2 => 5 taps
-            Expr rx = rxy.x - 2;        // in [-2..2]
-            Expr ry = rxy.y - 2;        // in [-2..2]
-
-            // Compute 2D weights
-            Expr distx = rx - fracWx;
-            Expr disty = ry - fracWy;
-            Expr w_x   = lanczos2(distx);
-            Expr w_y   = lanczos2(disty);
-            Expr w2D   = w_x * w_y;
-
-            // Sample from keyframe at (floorWx+rx, floorWy+ry)
-            // with boundary checks
-            Expr sample_x = cast<int>(floorWx) + rx;
-            Expr sample_y = cast<int>(floorWy) + ry;
-            Expr val = cast<float>( clamped(sample_x, sample_y) );
-
-            // Sum up w2D*val and w2D separately
-            Expr sum_num = sum(w2D * val);
-            Expr sum_den = sum(w2D);
-
+            
+            // Precompute 1D Lanczos weights in X and Y, each 5 elements [0..4]
+            Func weight_x("weight_x"), weight_y("weight_y");
+            
+            // For u in [0..4], the distance is (u - 2) - fracWx in X
+            weight_x(i, u) = lanczos2(cast<float>(u - 2) - fracWx);
+            // Similarly in Y
+            weight_y(i, u) = lanczos2(cast<float>(u - 2) - fracWy);
+            
+            // Now do a small sum over tX in [0..4], tY in [0..4]
+            RDom rxy(0, 5, 0, 5, "rxy");
+            Expr w_2d = weight_x(i, rxy.x) * weight_y(i, rxy.y);
+            
+            Expr sample_x = cast<int>(floorWx) + (rxy.x - 2);
+            Expr sample_y = cast<int>(floorWy) + (rxy.y - 2);
+            Expr val      = cast<float>( clamped(sample_x, sample_y) );
+            
+            Expr sum_num  = sum(w_2d * val);
+            Expr sum_den  = sum(w_2d);
+            
             warp_pixel_y(i) = sum_num / sum_den;
         }
 
@@ -504,7 +498,6 @@ public:
         {
             // We'll define reduce_4(c), for c in [0..3].
             // Start from 0, then reduce over all i in [0..#selected_pixels).
-            Var c("c");
             reduce_4_x(c) = cast<double>(0);
 
             RDom r(0, selected_pixels_x.dim(0).extent(), "r");
@@ -530,7 +523,6 @@ public:
         {
             // We'll define reduce_4(c), for c in [0..3].
             // Start from 0, then reduce over all i in [0..#selected_pixels).
-            Var c("c");
             reduce_4_y(c) = cast<double>(0);
 
             RDom r(0, selected_pixels_y.dim(0).extent(), "r");
@@ -642,32 +634,24 @@ public:
         Expr fracWx  = Wx - floorWx;
         Expr fracWy  = Wy - floorWy;
 
-        // A 5×5 sampling kernel using Lanczos2 in 2D
-        RDom rxy(0, 5, 0, 5, "rxy"); // kernel radius=2 => 5 taps
-        Expr rx = rxy.x - 2;        // in [-2..2]
-        Expr ry = rxy.y - 2;        // in [-2..2]
+        // Precompute the 1D Lanczos weights (5 taps)
+        Func weight_x("weight_x"), weight_y("weight_y");
+        weight_x(x, y, u) = lanczos2(cast<float>(u - 2) - fracWx);
+        weight_y(x, y, u) = lanczos2(cast<float>(u - 2) - fracWy);
 
-        // Compute 2D weights
-        Expr distx = rx - fracWx;
-        Expr disty = ry - fracWy;
-        Expr w_x   = lanczos2(distx);
-        Expr w_y   = lanczos2(disty);
-        Expr w2D   = w_x * w_y;
+        RDom rxy(0, 5, 0, 5, "rxy");
+        Expr w_2d = weight_x(x, y, rxy.x) * weight_y(x, y, rxy.y);
 
-        // Sample from keyframe at (floorWx+rx, floorWy+ry)
-        // with boundary checks
-        Expr sample_x = cast<int>(floorWx) + rx;
-        Expr sample_y = cast<int>(floorWy) + ry;
-        Expr val = cast<float>( clamped(sample_x, sample_y) );
+        Expr sample_x = cast<int>(floorWx) + (rxy.x - 2);
+        Expr sample_y = cast<int>(floorWy) + (rxy.y - 2);
+        Expr val      = cast<float>( clamped(sample_x, sample_y) );
 
-        // Sum up w2D*val and w2D separately
-        Expr sum_num = sum(w2D * val);
-        Expr sum_den = sum(w2D);
+        Expr sum_num  = sum(w_2d * val);
+        Expr sum_den  = sum(w_2d);
 
         Expr interpolated = sum_num / sum_den;
-
-        Expr diff = abs(interpolated - input_template(tile_x, tile_y));
-        output(x, y) = cast<uint16_t>( clamp(diff, 0.0f, 65535.0f) );
+        Expr diff         = abs(interpolated - input_template(tile_x, tile_y));
+        output(x, y)      = cast<uint16_t>( clamp(diff, 0.0f, 65535.0f) );
     }
 
     void schedule()

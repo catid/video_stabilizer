@@ -18,22 +18,73 @@ inline void apply_schedule_sparse_warpdiff(
     using ::Halide::RVar;
     using ::Halide::TailStrategy;
     using ::Halide::Var;
-    Func output = pipeline.get_func(5);
+    Func output = pipeline.get_func(9);
+    Func sum_1 = pipeline.get_func(8);
+    Func sum = pipeline.get_func(7);
+    Func weight_y = pipeline.get_func(6);
+    Func weight_x = pipeline.get_func(5);
     Func repeat_edge = pipeline.get_func(4);
     Func lambda_0 = pipeline.get_func(3);
     Var v0(output.get_schedule().dims()[0].var);
     Var v0i("v0i");
     Var v1(output.get_schedule().dims()[1].var);
+    Var v12(weight_y.get_schedule().dims()[2].var);
     Var v1i("v1i");
+    RVar rxy_x(sum_1.update(0).get_schedule().dims()[0].var);
+    RVar rxy_y(sum_1.update(0).get_schedule().dims()[1].var);
     output
         .split(v0, v0, v0i, 32, TailStrategy::GuardWithIf)
-        .split(v1, v1, v1i, 2, TailStrategy::GuardWithIf)
+        .split(v1, v1, v1i, 2, TailStrategy::ShiftInwards)
         .unroll(v1i)
         .vectorize(v0i)
         .compute_root()
         .reorder({v0i, v1i, v0, v1})
         .fuse(v0, v1, v0)
         .parallel(v0);
+    sum_1
+        .store_in(MemoryType::Stack)
+        .split(v0, v0, v0i, 8, TailStrategy::RoundUp)
+        .unroll(v0)
+        .vectorize(v0i)
+        .compute_at(output, v1i)
+        .reorder({v0i, v0, v1});
+    sum_1.update(0)
+        .split(v0, v0, v0i, 8, TailStrategy::RoundUp)
+        .unroll(v0)
+        .vectorize(v0i)
+        .reorder({v0i, v0, v1, rxy_x, rxy_y});
+    sum
+        .split(v0, v0, v0i, 8, TailStrategy::RoundUp)
+        .split(v1, v1, v1i, 2, TailStrategy::RoundUp)
+        .unroll(v1i)
+        .vectorize(v0i)
+        .compute_root()
+        .reorder({v0i, v1i, v0, v1})
+        .fuse(v0, v1, v0)
+        .parallel(v0);
+    sum.update(0)
+        .split(v0, v0, v0i, 32, TailStrategy::GuardWithIf)
+        .split(v1, v1, v1i, 2, TailStrategy::GuardWithIf)
+        .vectorize(v0i)
+        .reorder({v0i, rxy_x, rxy_y, v1i, v0, v1})
+        .fuse(v0, v1, v0)
+        .parallel(v0);
+    weight_y
+        .split(v0, v0, v0i, 16, TailStrategy::ShiftInwards)
+        .split(v1, v1, v1i, 13, TailStrategy::GuardWithIf)
+        .vectorize(v0i)
+        .compute_root()
+        .reorder({v0i, v1i, v0, v1, v12})
+        .fuse(v1, v12, v1)
+        .fuse(v0, v1, v0)
+        .parallel(v0);
+    weight_x
+        .split(v0, v0, v0i, 16, TailStrategy::ShiftInwards)
+        .vectorize(v0i)
+        .compute_root()
+        .reorder({v0i, v0, v1, v12})
+        .fuse(v1, v12, v1)
+        .parallel(v1);
 
 }
 
