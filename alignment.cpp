@@ -107,58 +107,48 @@ bool VideoAligner::ComputeKeyFrame() {
 
 static cv::Mat ComputeHessianFromSelected(
     const Halide::Runtime::Buffer<float> &selected_jacobian_x,
-    const Halide::Runtime::Buffer<float> &selected_jacobian_y)
-{
-    const int m = selected_jacobian_x.dim(0).extent();
+    const Halide::Runtime::Buffer<float> &selected_jacobian_y) {
+    
     cv::Mat H = cv::Mat::zeros(4, 4, CV_64F);
-
-    for (int i = 0; i < m; i++)
-    {
-        // J in [4], each is float
-        double j0 = selected_jacobian_x(i, 0);
-        double j1 = selected_jacobian_x(i, 1);
-        double j2 = selected_jacobian_x(i, 2);
-        double j3 = selected_jacobian_x(i, 3);
-
-        // Outer product Jᵀ*J, accumulate into H
-        // H is symmetrical, but we’ll just fill all entries for clarity:
-        H.at<double>(0,0) += j0*j0;  H.at<double>(0,1) += j0*j1;
-        H.at<double>(0,2) += j0*j2;  H.at<double>(0,3) += j0*j3;
-
-        H.at<double>(1,0) += j1*j0;  H.at<double>(1,1) += j1*j1;
-        H.at<double>(1,2) += j1*j2;  H.at<double>(1,3) += j1*j3;
-
-        H.at<double>(2,0) += j2*j0;  H.at<double>(2,1) += j2*j1;
-        H.at<double>(2,2) += j2*j2;  H.at<double>(2,3) += j2*j3;
-
-        H.at<double>(3,0) += j3*j0;  H.at<double>(3,1) += j3*j1;
-        H.at<double>(3,2) += j3*j2;  H.at<double>(3,3) += j3*j3;
+    
+    // Pre-compute pointers to matrix data for faster access
+    double* H_data = reinterpret_cast<double*>(H.data);
+    const int H_step = H.step / sizeof(double);
+    
+    // Process both jacobians in a single function
+    auto processJacobian = [&H_data, H_step](const Halide::Runtime::Buffer<float> &jacobian) {
+        const int m = jacobian.dim(0).extent();
+        
+        for (int i = 0; i < m; i++) {
+            // Load jacobian values
+            double j[4] = {
+                jacobian(i, 0),
+                jacobian(i, 1),
+                jacobian(i, 2),
+                jacobian(i, 3)
+            };
+            
+            // Only compute upper triangular part (including diagonal)
+            // due to symmetry: H(i,j) = H(j,i)
+            for (int r = 0; r < 4; r++) {
+                for (int c = r; c < 4; c++) {
+                    H_data[r * H_step + c] += j[r] * j[c];
+                }
+            }
+        }
+    };
+    
+    // Process both jacobians
+    processJacobian(selected_jacobian_x);
+    processJacobian(selected_jacobian_y);
+    
+    // Copy the upper triangular values to the lower triangular part
+    for (int r = 0; r < 4; r++) {
+        for (int c = r + 1; c < 4; c++) {
+            H_data[c * H_step + r] = H_data[r * H_step + c];
+        }
     }
-
-    const int n = selected_jacobian_y.dim(0).extent();
-    for (int i = 0; i < n; i++)
-    {
-        // J in [4], each is float
-        double j0 = selected_jacobian_y(i, 0);
-        double j1 = selected_jacobian_y(i, 1);
-        double j2 = selected_jacobian_y(i, 2);
-        double j3 = selected_jacobian_y(i, 3);
-
-        // Outer product Jᵀ*J, accumulate into H
-        // H is symmetrical, but we’ll just fill all entries for clarity:
-        H.at<double>(0,0) += j0*j0;  H.at<double>(0,1) += j0*j1;
-        H.at<double>(0,2) += j0*j2;  H.at<double>(0,3) += j0*j3;
-
-        H.at<double>(1,0) += j1*j0;  H.at<double>(1,1) += j1*j1;
-        H.at<double>(1,2) += j1*j2;  H.at<double>(1,3) += j1*j3;
-
-        H.at<double>(2,0) += j2*j0;  H.at<double>(2,1) += j2*j1;
-        H.at<double>(2,2) += j2*j2;  H.at<double>(2,3) += j2*j3;
-
-        H.at<double>(3,0) += j3*j0;  H.at<double>(3,1) += j3*j1;
-        H.at<double>(3,2) += j3*j2;  H.at<double>(3,3) += j3*j3;
-    }
-
+    
     return H;
 }
 
@@ -326,6 +316,22 @@ bool VideoAligner::AlignNextFrame(
         }
 
         cv::Mat H = ComputeHessianFromSelected(selected_jacobian_x, selected_jacobian_y);
+
+        // Add condition number check using SVD
+        cv::SVD svd(H);
+        double min_sv = svd.w.at<double>(svd.w.rows-1);
+        double max_sv = svd.w.at<double>(0);
+        double condition_number = max_sv / (min_sv + 1e-10); // Avoid division by zero
+
+        if (condition_number > 1e6) {
+            // Matrix is ill-conditioned, apply Tikhonov regularization
+            double lambda = 1e-6 * max_sv;
+            for (int i = 0; i < H.rows; i++) {
+                H.at<double>(i, i) += lambda;
+            }
+            std::cout << "Condition number: " << condition_number << ", lambda: " << lambda << std::endl;
+        }
+
         cv::Mat Hinv = H.inv(cv::DECOMP_SVD);
 
         //std::cout << "i=" << i << ": Selected pixels: " << selected_pixels.width() << std::endl;
