@@ -51,4 +51,5 @@ private:
                                std::vector<Eigen::VectorXd> &sigmaPoints);
     Eigen::VectorXd predictAugState(const Eigen::VectorXd &X_aug);
     Eigen::VectorXd stateToMeasurement(const Eigen::VectorXd &X_aug);
+    void ResetP();
 };

@@ -27,7 +27,7 @@ CameraMotionUKF_FixedLag::CameraMotionUKF_FixedLag(int lag)
     X_ = Eigen::VectorXd::Zero(augStateDim_);
 
     // Initialize the covariance to something small but nonzero
-    P_ = 1e-3 * Eigen::MatrixXd::Identity(augStateDim_, augStateDim_);
+    ResetP();
 
     // Build Q_aug_ as block-diagonal or something that accounts
     // for each block's process noise. For simplicity, below we
@@ -58,6 +58,21 @@ CameraMotionUKF_FixedLag::CameraMotionUKF_FixedLag(int lag)
     R_(3,3) = 1e-2;
 }
 
+void CameraMotionUKF_FixedLag::ResetP()
+{
+    P_ = Eigen::MatrixXd::Zero(augStateDim_, augStateDim_);
+    for (int i = 0; i < augStateDim_; i += SINGLE_STATE_DIM) {
+        P_(i,i) = 1e-3;
+        P_(i+1,i+1) = 1e-3;
+        P_(i+2,i+2) = 1e-2;
+        P_(i+3,i+3) = 1e-2;
+        P_(i+4,i+4) = 1e-3;
+        P_(i+5,i+5) = 1e-3;
+        P_(i+6,i+6) = 1e-2;
+        P_(i+7,i+7) = 1e-2;
+    }
+}
+
 SimilarityTransform CameraMotionUKF_FixedLag::update(const SimilarityTransform &meas, bool reset)
 {
     // 1) Optionally output the "fully smoothed" state that has just
@@ -85,8 +100,7 @@ SimilarityTransform CameraMotionUKF_FixedLag::update(const SimilarityTransform &
             X_(idx+6) = 0.0;
             X_(idx+7) = 0.0;
         }
-        // Make P_ small again
-        P_ = 1e-3 * Eigen::MatrixXd::Identity(augStateDim_, augStateDim_);
+        ResetP();
     }
 
     // 3) Generate sigma points for augmented state
