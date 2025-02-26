@@ -8,8 +8,6 @@ Phase correlation initialization is available but is disabled since it seems to 
 
 One thing that is worse is that I haven't managed to get a UKF working to estimate the camera intentional motion so there's a large amount of black pull-in artifacts that can be improved further.
 
-I also haven't implemented the divergence check that was described in the blog post, which seems like a good idea to add at some point.
-
 
 ## Setup
 

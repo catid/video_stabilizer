@@ -35,6 +35,9 @@ struct VideoAlignerParams {
     */
     int pyramid_min_width = 20;
     int pyramid_min_height = 20;
+
+    // Maximum converged displacement in pixels at any pyramid level
+    double max_displacement = 8.0;
 };
 
 /*

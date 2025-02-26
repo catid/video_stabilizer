@@ -583,7 +583,17 @@ bool VideoAligner::AlignNextFrame(
         }
 
         int iterations_performed = 0;
-        
+
+        auto ul0 = transform.warp(Point{0.f, 0.f});
+        auto ur0 = transform.warp(Point{image_width - 1.f, 0.f});
+        auto ll0 = transform.warp(Point{0.f, image_height - 1.f});
+        auto lr0 = transform.warp(Point{image_width - 1.f, image_height - 1.f});
+
+        auto ul1 = ul0;
+        auto ur1 = ur0;
+        auto ll1 = ll0;
+        auto lr1 = lr0;
+
         for (int iter = 0; iter < params.max_iters; iter++) {
             TIME_FUNCTION("ICAIteration_" + std::to_string(i) + "_" + std::to_string(iter));
             iterations_performed++;
@@ -621,40 +631,27 @@ bool VideoAligner::AlignNextFrame(
             delta_transform.TX = dt.at<double>(2);
             delta_transform.TY = dt.at<double>(3);
 
-            Point ul0{0.f, 0.f};
-            Point ur0{image_width - 1.f, 0.f};
-            Point ll0{0.f, image_height - 1.f};
-            Point lr0{image_width - 1.f, image_height - 1.f};
-
-            ul0 = transform.warp(ul0);
-            ur0 = transform.warp(ur0);
-            ll0 = transform.warp(ll0);
-            lr0 = transform.warp(lr0);
-
             {
                 TIME_FUNCTION("TransformCompose_" + std::to_string(i) + "_" + std::to_string(iter));
                 transform = delta_transform.compose(transform);
             }
 
-            Point ul1{0.f, 0.f};
-            Point ur1{image_width - 1.f, 0.f};
-            Point ll1{0.f, image_height - 1.f};
-            Point lr1{image_width - 1.f, image_height - 1.f};
+            auto ul2 = transform.warp(Point{0.f, 0.f});
+            auto ur2 = transform.warp(Point{image_width - 1.f, 0.f});
+            auto ll2 = transform.warp(Point{0.f, image_height - 1.f});
+            auto lr2 = transform.warp(Point{image_width - 1.f, image_height - 1.f});
 
-            ul1 = transform.warp(ul1);
-            ur1 = transform.warp(ur1);
-            ll1 = transform.warp(ll1);
-            lr1 = transform.warp(lr1);
+            double ud12 = std::max(ul2.distance(ul1), ur2.distance(ur1));
+            double ld12 = std::max(ll2.distance(ll1), lr2.distance(lr1));
+            double displacement12 = std::max(ud12, ld12);
 
-            double ud = std::max(ul1.distance(ul0), ur1.distance(ur0));
-            double ld = std::max(ll1.distance(ll0), lr1.distance(lr0));
-            double displacement = std::max(ud, ld);
-            
+            ul1 = ul2, ur1 = ur2, ll1 = ll2, lr1 = lr2;
+
 #ifdef ENABLE_PERFORMANCE_METRICS
             PerformanceMetrics::getInstance().logMetric("Displacement_" + std::to_string(i) + "_" + std::to_string(iter), displacement);
 #endif
 
-            if (displacement < params.threshold) {
+            if (displacement12 < params.threshold) {
                 break;
             }
 
@@ -666,7 +663,16 @@ bool VideoAligner::AlignNextFrame(
                 return false;
             }
         }
-        
+
+        double ud01 = std::max(ul0.distance(ul1), ur0.distance(ur1));
+        double ld01 = std::max(ll0.distance(ll1), lr0.distance(lr1));
+        double displacement01 = std::max(ud01, ld01);
+
+        if (displacement01 > params.max_displacement) {
+            //std::cout << "Displacement: " << displacement01 << " Layer: " << i << std::endl;
+            return false;
+        }
+
 #ifdef ENABLE_PERFORMANCE_METRICS
         PerformanceMetrics::getInstance().logMetric("IterationsPerformed_" + std::to_string(i), iterations_performed);
 #endif
