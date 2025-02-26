@@ -6,50 +6,49 @@
 #include <deque>
 #include <cmath>
 
-class CameraMotionUKF {
+class CameraMotionUKF_FixedLag
+{
 public:
-    CameraMotionUKF();
-    
-    /**
-     * @brief Update the filter with the newest measured SimilarityTransform from frame i to frame i+1.
-     * @param meas   The measured transform from the frame aligner (possibly noisy).
-     * @param reset  If true, reset filter state to measurement. (e.g. if a jump or scene cut is detected)
-     * @return       The *one-frame-delayed* smoothed transform from the previous step.
-     */
-    SimilarityTransform update(const SimilarityTransform &meas, bool reset);
+    static const int SINGLE_STATE_DIM = 8;  // [A,B,TX,TY, vA, vB, vTX, vTY]
+    static const int MEAS_DIM = 4;         // measuring [A,B,TX,TY] only
+
+    CameraMotionUKF_FixedLag(int lag);
+
+    // update() takes a new measurement and returns the smoothed output
+    SimilarityTransform update(const SimilarityTransform &meas, bool reset=false);
 
 private:
-    static constexpr int STATE_DIM = 8; 
-    static constexpr int MEAS_DIM  = 4;
+    // Number of states in our augmented vector
+    int lag_;                // e.g. N
+    int augStateDim_;        // = lag_ * SINGLE_STATE_DIM
 
-    // UKF parameters
+    // UKF hyperparameters
     double alpha_;
     double beta_;
     double kappa_;
     double lambda_;
 
-    // State vector and covariance
-    Eigen::VectorXd x_; // [r, tx, ty, rVel, txVel, tyVel]
-    Eigen::MatrixXd P_; // State covariance (6x6)
+    // Augmented state vector X_ and covariance P_
+    // (dimension = lag_ * SINGLE_STATE_DIM)
+    Eigen::VectorXd X_;
+    Eigen::MatrixXd P_;
 
-    // Process and measurement noise covariances
-    Eigen::MatrixXd Q_; // (6x6)
-    Eigen::MatrixXd R_; // (3x3)
+    // Process and measurement noise for augmented system
+    Eigen::MatrixXd Q_aug_;
+    Eigen::MatrixXd R_;
 
-    // We keep a small buffer for the one-frame delay:
-    // - store the *filtered* result for each update
-    // - next time we are asked, we return the previously stored transform
+    // Weights for unscented transform
+    Eigen::VectorXd wMean_;
+    Eigen::VectorXd wCov_;
+
+    // Some optional queue to hold "fully smoothed" outputs
     std::deque<SimilarityTransform> delayedOutput_;
 
 private:
-    // Helper: generate sigma points
-    void generateSigmaPoints(const Eigen::VectorXd &x, 
-                             const Eigen::MatrixXd &P, 
-                             std::vector<Eigen::VectorXd> &sigmaPoints);
-
-    // Helper: predict each sigma point through the motion model
-    Eigen::VectorXd predictState(const Eigen::VectorXd &state, double dt);
-
-    // Helper: compute measurement from predicted state (extract [r, tx, ty])
-    Eigen::VectorXd stateToMeasurement(const Eigen::VectorXd &state);
+    // Helper methods
+    void   generateSigmaPoints(const Eigen::VectorXd &x,
+                               const Eigen::MatrixXd &P,
+                               std::vector<Eigen::VectorXd> &sigmaPoints);
+    Eigen::VectorXd predictAugState(const Eigen::VectorXd &X_aug);
+    Eigen::VectorXd stateToMeasurement(const Eigen::VectorXd &X_aug);
 };

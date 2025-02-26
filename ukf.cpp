@@ -1,234 +1,249 @@
 #include "ukf.hpp"
 
-//------------------------------------------------------------------------------
-// Implementation
-//------------------------------------------------------------------------------
-
-CameraMotionUKF::CameraMotionUKF()
+CameraMotionUKF_FixedLag::CameraMotionUKF_FixedLag(int lag)
+  : lag_(lag)
 {
-    // Initialize UKF hyper-parameters
-    alpha_ = 1e-3;
+    // The new dimension is lag_ * SINGLE_STATE_DIM
+    augStateDim_ = lag_ * SINGLE_STATE_DIM;
+
+    // Typical UKF hyperparams
+    alpha_ = 1.0;
     beta_  = 2.0;
-    kappa_ = 0.0;
-    const int L = STATE_DIM;
-    lambda_ = alpha_ * alpha_ * (L + kappa_) - L;
+    kappa_ = 3.0 - (double)augStateDim_;
+    lambda_ = alpha_*alpha_ * (augStateDim_ + kappa_) - augStateDim_;
 
-    // Initial state
-    x_ = Eigen::VectorXd::Zero(STATE_DIM);
-    // Initial covariance
-    P_ = Eigen::MatrixXd::Identity(STATE_DIM, STATE_DIM) * 1e-2;
+    // Build weight vectors
+    const int nSigma = 2 * augStateDim_ + 1;
+    wMean_.resize(nSigma);
+    wCov_.resize(nSigma);
+    wMean_(0) = lambda_ / (augStateDim_ + lambda_);
+    wCov_(0)  = wMean_(0) + (1.0 - alpha_*alpha_ + beta_);
+    for (int i = 1; i < nSigma; i++) {
+        wMean_(i) = 1.0 / (2.0 * (augStateDim_ + lambda_));
+        wCov_(i)  = wMean_(i);
+    }
 
-    // Example: set process noise Q_ for a constant-velocity model
-    Q_ = Eigen::MatrixXd::Zero(STATE_DIM, STATE_DIM);
-    // Heuristics: small noise on position, bigger on velocity, tune these as needed
-    Q_(0,0) = 1e-3; // A
-    Q_(1,1) = 1e-3; // B
-    Q_(2,2) = 1e-2; // TX
-    Q_(3,3) = 1e-2; // TY
-    Q_(4,4) = 1e-3; // velocity A
-    Q_(5,5) = 1e-3; // velocity B
-    Q_(6,6) = 1e-2; // vx
-    Q_(7,7) = 1e-2; // vy
+    // Initialize the augmented state with zeros
+    X_ = Eigen::VectorXd::Zero(augStateDim_);
 
+    // Initialize the covariance to something small but nonzero
+    P_ = 1e-3 * Eigen::MatrixXd::Identity(augStateDim_, augStateDim_);
+
+    // Build Q_aug_ as block-diagonal or something that accounts
+    // for each block's process noise. For simplicity, below we
+    // assume each block has the same Q as your normal single-state Q,
+    // then place it along the diagonal. You can tune as needed.
+    Eigen::MatrixXd Q_single = Eigen::MatrixXd::Zero(SINGLE_STATE_DIM, SINGLE_STATE_DIM);
+    Q_single(0,0) = 1e-2;
+    Q_single(1,1) = 1e-2;
+    Q_single(2,2) = 1e-1;
+    Q_single(3,3) = 1e-1;
+    Q_single(4,4) = 1e-2;
+    Q_single(5,5) = 1e-2;
+    Q_single(6,6) = 1e-1;
+    Q_single(7,7) = 1e-1;
+
+    Q_aug_ = Eigen::MatrixXd::Zero(augStateDim_, augStateDim_);
+    for (int block = 0; block < lag_; block++) {
+        int start = block * SINGLE_STATE_DIM;
+        Q_aug_.block(start, start, SINGLE_STATE_DIM, SINGLE_STATE_DIM) = Q_single;
+    }
+
+    // Measurement noise R_ stays the same dimension
+    // (measuring [A,B,TX,TY] for the *top block* only)
     R_ = Eigen::MatrixXd::Zero(MEAS_DIM, MEAS_DIM);
     R_(0,0) = 1e-3;
     R_(1,1) = 1e-3;
     R_(2,2) = 1e-2;
     R_(3,3) = 1e-2;
-
-    delayedOutput_.clear();
 }
 
-//------------------------------------------------------------------------------
-// UKF update
-//------------------------------------------------------------------------------
-
-SimilarityTransform CameraMotionUKF::update(const SimilarityTransform &meas, bool reset)
+SimilarityTransform CameraMotionUKF_FixedLag::update(const SimilarityTransform &meas, bool reset)
 {
-    // 1) We want to return the *delayed* result from the *previous* update
-    //    so let's capture what we'll return *now* (i.e. from last iteration).
+    // 1) Optionally output the "fully smoothed" state that has just
+    //    left our lag window. For example, if you want the oldest
+    //    block in X_ (which is block index = lag_-1).
     SimilarityTransform out;
     if (!delayedOutput_.empty()) {
         out = delayedOutput_.front();
         delayedOutput_.pop_front();
     } else {
-        // No previous estimate -> return identity or best guess
         out = SimilarityTransform(); // identity
     }
 
-    // 3) If reset requested, reset the filter to the measurement
+    // 2) If reset, then fill the entire augmented state with the current measurement
+    //    and zero the velocities. This basically sets X_(0..7) repeated across all blocks.
     if (reset) {
-        x_(0) = meas.A;
-        x_(1) = meas.B;
-        x_(2) = meas.TX;
-        x_(3) = meas.TY;
-        x_(4) = 0.0;
-        x_(5) = 0.0;
-        x_(6) = 0.0;
-        x_(7) = 0.0;
-        P_ = Eigen::MatrixXd::Zero(STATE_DIM, STATE_DIM); // 8×8
-        P_(0,0) = 1e-3;
-        P_(1,1) = 1e-3;
-        P_(2,2) = 1e-2;
-        P_(3,3) = 1e-2;
-        P_(4,4) = 1e-3;
-        P_(5,5) = 1e-3;
-        P_(6,6) = 1e-2;
-        P_(7,7) = 1e-2;
+        for (int block = 0; block < lag_; block++) {
+            int idx = block * SINGLE_STATE_DIM;
+            X_(idx+0) = meas.A;
+            X_(idx+1) = meas.B;
+            X_(idx+2) = meas.TX;
+            X_(idx+3) = meas.TY;
+            X_(idx+4) = 0.0;
+            X_(idx+5) = 0.0;
+            X_(idx+6) = 0.0;
+            X_(idx+7) = 0.0;
+        }
+        // Make P_ small again
+        P_ = 1e-3 * Eigen::MatrixXd::Identity(augStateDim_, augStateDim_);
     }
 
-    // UKF steps:
-    //   a) Generate sigma points
+    // 3) Generate sigma points for augmented state
     std::vector<Eigen::VectorXd> sigmaPoints;
-    generateSigmaPoints(x_, P_, sigmaPoints);
+    generateSigmaPoints(X_, P_, sigmaPoints);
+    const int nSigma = (int)sigmaPoints.size(); // = 2*augStateDim_ + 1
 
-    //   b) Predict each sigma point with the motion model
-    //      we assume dt=1.0 for "frame-to-frame" (or you can pass your actual dt)
-    double dt = 1.0; 
-    std::vector<Eigen::VectorXd> sigmaPointsPred(sigmaPoints.size());
-    for (size_t i=0; i<sigmaPoints.size(); i++) {
-        sigmaPointsPred[i] = predictState(sigmaPoints[i], dt);
+    // 4) Predict step: apply predictAugState() to each sigma point
+    std::vector<Eigen::VectorXd> sigmaPointsPred(nSigma);
+    for (int i = 0; i < nSigma; i++) {
+        sigmaPointsPred[i] = predictAugState(sigmaPoints[i]);
     }
 
-    //   c) Compute predicted mean & covariance
-    const int L = STATE_DIM;
-    int nSigma = 2*L + 1;
-
-    // Weights
-    Eigen::VectorXd wMean(nSigma), wCov(nSigma);
-    wMean(0) = lambda_ / (L + lambda_);
-    wCov(0)  = lambda_ / (L + lambda_) + (1 - alpha_*alpha_ + beta_);
-    for (int i=1; i<nSigma; i++) {
-        wMean(i) = 1.0 / (2.0 * (L + lambda_));
-        wCov(i)  = 1.0 / (2.0 * (L + lambda_));
+    // 5) Compute predicted mean XPred and covariance PPred
+    Eigen::VectorXd XPred = Eigen::VectorXd::Zero(augStateDim_);
+    for (int i = 0; i < nSigma; i++) {
+        XPred += wMean_(i) * sigmaPointsPred[i];
     }
 
-    // Predict state mean
-    Eigen::VectorXd xPred = Eigen::VectorXd::Zero(L);
-    for (int i=0; i<nSigma; i++) {
-        xPred += wMean(i) * sigmaPointsPred[i];
+    Eigen::MatrixXd PPred = Eigen::MatrixXd::Zero(augStateDim_, augStateDim_);
+    for (int i = 0; i < nSigma; i++) {
+        Eigen::VectorXd diff = sigmaPointsPred[i] - XPred;
+        PPred += wCov_(i) * diff * diff.transpose();
     }
+    PPred += Q_aug_;
 
-    // Predict state covariance
-    Eigen::MatrixXd PPred = Eigen::MatrixXd::Zero(L, L);
-    for (int i=0; i<nSigma; i++) {
-        Eigen::VectorXd diff = sigmaPointsPred[i] - xPred;
-        PPred += wCov(i) * (diff * diff.transpose());
-    }
-    // Add process noise
-    PPred += Q_;
-
-    //   d) Transform predicted sigma points into measurement space
+    // 6) Transform predicted sigma points into measurement space
+    //    We only measure the top block => dimension = 4
     std::vector<Eigen::VectorXd> Zsigma(nSigma);
-    for (int i=0; i<nSigma; i++) {
-        Zsigma[i] = stateToMeasurement(sigmaPointsPred[i]); // dimension 3
+    for (int i = 0; i < nSigma; i++) {
+        Zsigma[i] = stateToMeasurement(sigmaPointsPred[i]); // 4D
     }
-
-    // Compute predicted measurement zPred
+    // Predicted measurement zPred
     Eigen::VectorXd zPred = Eigen::VectorXd::Zero(MEAS_DIM);
-    for (int i=0; i<nSigma; i++) {
-        zPred += wMean(i) * Zsigma[i];
+    for (int i = 0; i < nSigma; i++) {
+        zPred += wMean_(i) * Zsigma[i];
     }
 
-    // Compute measurement covariance S and cross-covariance Tc
-    Eigen::MatrixXd S = Eigen::MatrixXd::Zero(MEAS_DIM, MEAS_DIM);
-    Eigen::MatrixXd Tc= Eigen::MatrixXd::Zero(L, MEAS_DIM);
-
-    for (int i=0; i<nSigma; i++) {
-        // measurement diff
+    // 7) Compute measurement covariance S and cross-covariance Tc
+    Eigen::MatrixXd S  = Eigen::MatrixXd::Zero(MEAS_DIM, MEAS_DIM);
+    Eigen::MatrixXd Tc = Eigen::MatrixXd::Zero(augStateDim_, MEAS_DIM);
+    for (int i = 0; i < nSigma; i++) {
         Eigen::VectorXd zDiff = Zsigma[i] - zPred;
-
-        // state diff
-        Eigen::VectorXd xDiff = sigmaPointsPred[i] - xPred;
-
-        S  += wCov(i) * zDiff * zDiff.transpose();
-        Tc += wCov(i) * xDiff * zDiff.transpose();
+        Eigen::VectorXd xDiff = sigmaPointsPred[i] - XPred;
+        S  += wCov_(i) * zDiff * zDiff.transpose();
+        Tc += wCov_(i) * xDiff * zDiff.transpose();
     }
-    // Add measurement noise
     S += R_;
 
-    //   e) Kalman gain
+    // 8) Kalman gain
     Eigen::MatrixXd K = Tc * S.inverse();
 
-    //   f) Update state mean/covariance with measurement
+    // 9) Update state
     Eigen::VectorXd zMeas(MEAS_DIM);
     zMeas << meas.A, meas.B, meas.TX, meas.TY;
-    // measurement residual
+
     Eigen::VectorXd y = zMeas - zPred;
-
-    // new state
-    Eigen::VectorXd xNew = xPred + K * y;
-
-    // new covariance
+    Eigen::VectorXd XNew = XPred + K * y;
     Eigen::MatrixXd PNew = PPred - K * S * K.transpose();
 
-    // store
-    x_ = xNew;
+    // Store
+    X_ = XNew;
     P_ = PNew;
 
-    // 4) Build the final output transform from the filtered (r, tx, ty) plus the *original* scale
+    // 10) Convert the *first/top block* of X_ into a SimilarityTransform
+    //     (this is the “current, newly smoothed” state).
     SimilarityTransform currentFiltered;
-    currentFiltered.A = x_(0);
-    currentFiltered.B = x_(1);
-    currentFiltered.TX = x_(2);
-    currentFiltered.TY = x_(3);
+    currentFiltered.A  = X_(0);
+    currentFiltered.B  = X_(1);
+    currentFiltered.TX = X_(2);
+    currentFiltered.TY = X_(3);
 
-    // 5) Push that into the queue for next iteration’s delayed output
-    delayedOutput_.push_back(currentFiltered);
+    // 11) Also convert the *oldest block* into a SimilarityTransform and
+    //     push it onto delayedOutput_ so that it will eventually get returned
+    //     once it’s fully smoothed by N steps.
+    {
+        int oldestBlock = (lag_ - 1) * SINGLE_STATE_DIM;
+        SimilarityTransform oldest;
+        oldest.A  = X_(oldestBlock + 0);
+        oldest.B  = X_(oldestBlock + 1);
+        oldest.TX = X_(oldestBlock + 2);
+        oldest.TY = X_(oldestBlock + 3);
+        delayedOutput_.push_back(oldest);
+    }
 
-    // 6) Return the *previous* result
+    // 12) Return the “fully smoothed” transform for the step that just fell off
+    //     the end of our lag window, or identity if none yet.
     return out;
 }
 
-//------------------------------------------------------------------------------
-// Helper methods
-//------------------------------------------------------------------------------
-
-void CameraMotionUKF::generateSigmaPoints(const Eigen::VectorXd &x,
-                                          const Eigen::MatrixXd &P,
-                                          std::vector<Eigen::VectorXd> &sigmaPoints)
+Eigen::VectorXd CameraMotionUKF_FixedLag::predictAugState(const Eigen::VectorXd &X_aug)
 {
-    const int L = STATE_DIM;
-    Eigen::MatrixXd A = P.llt().matrixL(); // chol decomp
-    sigmaPoints.resize(2*L + 1, Eigen::VectorXd::Zero(L));
+    Eigen::VectorXd Xpred = Eigen::VectorXd::Zero(augStateDim_);
 
-    // Calculate sigma points
-    double scale = std::sqrt(L + lambda_);
-    sigmaPoints[0] = x;
-    for (int i=0; i<L; i++) {
-        sigmaPoints[i+1]     = x + scale * A.col(i);
-        sigmaPoints[i+1+L]   = x - scale * A.col(i);
+    // SHIFT: X_{k-1} <- X_{k}, X_{k-2} <- X_{k-1}, ...
+    // i.e. block i gets block i-1 from the old vector
+    for (int block = lag_ - 1; block >= 1; block--) {
+        int dst = block * SINGLE_STATE_DIM;
+        int src = (block - 1) * SINGLE_STATE_DIM;
+        Xpred.segment(dst, SINGLE_STATE_DIM) =
+            X_aug.segment(src, SINGLE_STATE_DIM);
     }
+
+    // For the *top* block (block=0), do your normal motion model
+    {
+        // old top block
+        double A    = X_aug(0);
+        double B    = X_aug(1);
+        double TX   = X_aug(2);
+        double TY   = X_aug(3);
+        double vA   = X_aug(4);
+        double vB   = X_aug(5);
+        double vTX  = X_aug(6);
+        double vTY  = X_aug(7);
+
+        // Predict forward (dt=1)
+        A  += vA;
+        B  += vB;
+        TX += vTX;
+        TY += vTY;
+
+        // Fill into Xpred(0..7)
+        Xpred(0) = A;
+        Xpred(1) = B;
+        Xpred(2) = TX;
+        Xpred(3) = TY;
+        Xpred(4) = vA;
+        Xpred(5) = vB;
+        Xpred(6) = vTX;
+        Xpred(7) = vTY;
+    }
+    return Xpred;
 }
 
-Eigen::VectorXd CameraMotionUKF::predictState(const Eigen::VectorXd &state, double dt)
-{
-    // State = [r, tx, ty, rVel, txVel, tyVel]
-    Eigen::VectorXd xPred(STATE_DIM);
-    double A     = state(0);
-    double B     = state(1);
-    double TX    = state(2);
-    double TY    = state(3);
-    double vA    = state(4);
-    double vB    = state(5);
-    double vTX   = state(6);
-    double vTY   = state(7);
-
-    A += vA * dt;
-    B += vB * dt;
-    TX += vTX * dt;
-    TY += vTY * dt;
-
-    xPred << A, B, TX, TY, vA, vB, vTX, vTY;
-    return xPred;
-}
-
-Eigen::VectorXd CameraMotionUKF::stateToMeasurement(const Eigen::VectorXd &state)
+Eigen::VectorXd CameraMotionUKF_FixedLag::stateToMeasurement(const Eigen::VectorXd &X_aug)
 {
     Eigen::VectorXd z(MEAS_DIM);
-    z(0) = state(0);
-    z(1) = state(1);
-    z(2) = state(2);
-    z(3) = state(3);
+    z(0) = X_aug(0);
+    z(1) = X_aug(1);
+    z(2) = X_aug(2);
+    z(3) = X_aug(3);
     return z;
+}
+
+void CameraMotionUKF_FixedLag::generateSigmaPoints(const Eigen::VectorXd &x,
+                                                   const Eigen::MatrixXd &P,
+                                                   std::vector<Eigen::VectorXd> &sigmaPoints)
+{
+    const int L = augStateDim_;
+    sigmaPoints.resize(2*L + 1);
+
+    // Compute sqrt of (L+lambda_) * P via Cholesky
+    Eigen::MatrixXd A = ((L + lambda_) * P).llt().matrixL();
+
+    sigmaPoints[0] = x;
+    for (int i = 0; i < L; i++) {
+        sigmaPoints[i + 1]       = x + A.col(i);
+        sigmaPoints[i + 1 + L]   = x - A.col(i);
+    }
 }

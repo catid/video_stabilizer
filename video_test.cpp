@@ -1,6 +1,9 @@
 #include "stabilizer.hpp"
 
 #include <filesystem>
+#include <iostream>
+#include <opencv2/opencv.hpp> // Make sure to include OpenCV headers as needed
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -22,13 +25,30 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    // List of video files to process
-    std::vector<std::string> videoFiles = {
-        "example.mp4",
-        "road_skip.mp4",
-        "safe_first_short_flight.mp4",
-        "safe_second_short_flight.mp4"
-    };
+    // Collect all .mp4 files in the input directory
+    std::vector<std::string> videoFiles;
+    try {
+        if (!fs::exists(inputDir) || !fs::is_directory(inputDir)) {
+            std::cerr << "Error: Input directory does not exist or is not a directory.\n";
+            return EXIT_FAILURE;
+        }
+
+        for (const auto& entry : fs::directory_iterator(inputDir)) {
+            if (entry.is_regular_file() && entry.path().extension() == ".mp4") {
+                // Store the filename (or the full path if you prefer)
+                videoFiles.push_back(entry.path().filename().string());
+            }
+        }
+    } catch (const fs::filesystem_error& e) {
+        std::cerr << "Error reading input directory: " << e.what() << std::endl;
+        return EXIT_FAILURE;
+    }
+
+    // If no .mp4 files are found, exit early
+    if (videoFiles.empty()) {
+        std::cerr << "No .mp4 files found in the input directory: " << inputDir << std::endl;
+        return EXIT_FAILURE;
+    }
 
     // Iterate over each video file
     for (const auto& videoFile : videoFiles) {
@@ -48,7 +68,7 @@ int main() {
             std::cerr << "Warning: Unable to retrieve FPS for " << videoFile << ". Defaulting to 30 FPS." << std::endl;
             fps = 30.0; // Default FPS
         }
-        int crop = 16;
+        int crop = 0;
         int frameWidth = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_WIDTH)) - crop * 2; // Crop both edges
         int frameHeight = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_HEIGHT)) - crop * 2; // Crop both edges
 
@@ -57,7 +77,7 @@ int main() {
         // Define output video path
         std::string outputPath = fs::path(outputDir) / ("processed_" + videoFile);
 
-        // Initialize VideoWriter with 'mp4v' codec
+        // Initialize VideoWriter
         cv::VideoWriter writer;
         writer.open(outputPath, fourcc, fps, cv::Size(frameWidth, frameHeight), true);
         writer.set(cv::VIDEOWRITER_PROP_QUALITY, 90);
@@ -68,7 +88,8 @@ int main() {
             continue; // Skip to the next video file
         }
 
-        std::cout << "Input FPS: " << fps << " | Frame Size: " << frameWidth << "x" << frameHeight << std::endl;
+        std::cout << "Input FPS: " << fps 
+                  << " | Frame Size: " << frameWidth << "x" << frameHeight << std::endl;
         std::cout << "Writing processed video to: " << outputPath << std::endl;
 
         cv::Mat frame;
