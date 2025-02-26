@@ -1,105 +1,110 @@
 #include "stabilizer.hpp"
 
-VideoStabilizer::VideoStabilizer(int lag)
-    : ukf(lag)
+VideoStabilizer::VideoStabilizer(const VideoStabilizerParams& params)
+    : ukf(params.lag)
 {
-    m_lag = lag;
+    m_params = params;
 }
 
-static bool isIdentity(const SimilarityTransform &t, double eps = 1e-12)
+cv::Mat VideoStabilizer::processFrame(const cv::Mat& inputFrame)
 {
-    return (std::fabs(t.A)  < eps &&
-            std::fabs(t.B)  < eps &&
-            std::fabs(t.TX) < eps &&
-            std::fabs(t.TY) < eps);
-}
-
-cv::Mat VideoStabilizer::processFrame(const cv::Mat& inputFrame, int crop_pixels)
-{
-    // Increment frame index
+    // 1) Increment our frame index
     ++m_frameIndex;
 
-    // Keep a copy of the new input frame
+    // 2) Store the incoming frame for delayed output
     m_frameBuffer.push_back(inputFrame.clone());
 
-    // 1) Compute the measurement from the previous frame to current
+    // 3) Measure transform from the previous frame to current
     SimilarityTransform currentMeas;
-    bool success = aligner.AlignNextFrame(inputFrame, currentMeas);
+    bool success = aligner.AlignNextFrame(inputFrame, currentMeas, m_params.aligner);
 
-    // 2) Update the filter. The transform returned here is
-    //    the *earliest measurement* that the UKF has just “finalized,”
-    //    i.e. it has been smoothed by lag_ future measurements.
+    // 4) Update the UKF, which returns the earliest measurement that is
+    //    now fully “smoothed” after seeing lag_ future measurements.
     bool reset = !success;
-    SimilarityTransform earliestSmoothed = ukf.update(currentMeas, reset);
+    SimilarityTransform earliestSmoothed;
+    if (m_params.enable_ukf) {
+        earliestSmoothed = ukf.update(currentMeas, reset);
+    }
 
-    // If alignment failed, we reset our local accum/buffers
+    // If alignment fails, we reset accum (like original code).
     if (reset) {
         m_accum = SimilarityTransform(); // identity
     }
 
-    // 3) We still push the *new* measurement onto our local buffer
+    // 5) Store the new measurement (for future finalization)
     m_measurementBuffer.push_back(currentMeas);
 
-    // 4) Check if the UKF has finalized an old measurement.
-    //    Option A: Test if earliestSmoothed is non-identity.
-    //    Option B (original code): Use m_measurementBuffer.size() > m_lag
-    bool hasFinalized = (m_measurementBuffer.size() > (size_t)m_lag);
+    // 6) Check if we have finalized an old measurement
+    //    i.e. the UKF has done “lag” updates since that old measurement
+    bool hasFinalized = (m_measurementBuffer.size() > (size_t)m_params.lag);
 
-    cv::Mat outputFrame; // will be empty if nothing is finalized
+    cv::Mat outputFrame; // empty unless we finalize
 
     if (hasFinalized)
     {
-        // The earliest measurement that corresponds to earliestSmoothed
+        // 6a) Pop the earliest measurement from the queue
         SimilarityTransform earliestMeas = m_measurementBuffer.front();
         m_measurementBuffer.pop_front();
 
-        // Compute the “jitter” between the raw measurement and
-        // the final smoothed result for that measurement:
-        //    T_jitter = T_meas ∘ (T_smoothed)^(-1)
-        //SimilarityTransform jitter = earliestMeas.compose(earliestSmoothed.inverse());
-        SimilarityTransform jitter = earliestMeas;
-
-        // Compose into the “accum” to keep track of net drift
-        SimilarityTransform newAccum = m_accum.compose(jitter);
-
-        // Optionally check for large displacement => partial or full reset
-        double displacement = newAccum.maxCornerDisplacement(
-                                  inputFrame.cols, inputFrame.rows);
-        const double min_disp = 24.0, max_disp = 64.0;
-        double decay = 1.0;
-        if (displacement > max_disp) {
-            // Hard reset
-            reset = true;
-            m_accum = SimilarityTransform(); // identity
-        } else if (displacement > min_disp) {
-            double f = (displacement - min_disp) / (max_disp - min_disp);
-            f = std::max(0.0, std::min(1.0, f));
-            decay = 0.95 * (1.0 - f) + 0.5 * f;
+        // 6b) Either:
+        //
+        //     (A) No smoothing (just a 2-frame delay):
+        //         auto jitter = earliestMeas;
+        //
+        //     (B) Use the UKF’s smoothed difference:
+        //         auto jitter = earliestMeas.compose( earliestSmoothed.inverse() );
+        //
+        // Uncomment whichever approach you want:
+        SimilarityTransform jitter;
+        if (m_params.enable_ukf) {
+            jitter = earliestMeas.compose( earliestSmoothed.inverse() );
+        } else {
+            jitter = earliestMeas;  // <-- (A) purely raw measurement
         }
 
-        // Apply decay factor
-        m_accum.TX *= decay;
-        m_accum.TY *= decay;
-        m_accum.A  *= decay;
-        m_accum.B  *= decay;
+        // 6c) Compose into newAccum
+        SimilarityTransform newAccum = m_accum.compose(jitter);
 
-        // 5) Now that we have the final accum for that earliest measurement,
-        //    pop the corresponding earliest frame and warp it
+        // 6d) Check displacement for partial or full reset
+        double displacement = newAccum.maxCornerDisplacement(
+                                  inputFrame.cols, inputFrame.rows);
+
+        double decay = 1.0;
+        if (displacement > m_params.max_disp) {
+            // Hard reset
+            reset = true;
+            newAccum = SimilarityTransform(); // identity
+        } else if (displacement > m_params.min_disp) {
+            double f = (displacement - m_params.min_disp) / (m_params.max_disp - m_params.min_disp);
+            f = std::max(0.0, std::min(1.0, f));
+            decay = m_params.min_decay * (1.0 - f) + m_params.max_decay * f;
+
+            newAccum.TX *= decay;
+            newAccum.TY *= decay;
+            newAccum.A  *= decay;
+            newAccum.B  *= decay;
+        }
+
+        m_accum = newAccum;
+
+        // 6e) Pop the corresponding earliest frame
         if (!m_frameBuffer.empty())
         {
             cv::Mat frameToStabilize = m_frameBuffer.front();
             m_frameBuffer.pop_front();
 
-            // The actual correction is the inverse of newAccum
+            // 6f) Warp it by newAccum.inverse()
             SimilarityTransform correction = newAccum.inverse();
             cv::Mat stabilized = warpBySimilarityTransform(
                                      frameToStabilize, correction);
 
-            // Optional crop
-            if (crop_pixels > 0) {
-                cv::Rect roi(crop_pixels, crop_pixels,
-                             stabilized.cols - 2 * crop_pixels,
-                             stabilized.rows - 2 * crop_pixels);
+            // 7) Optional crop
+            if (m_params.crop_pixels > 0) {
+                cv::Rect roi(
+                    m_params.crop_pixels, m_params.crop_pixels,
+                    stabilized.cols  - 2*m_params.crop_pixels,
+                    stabilized.rows  - 2*m_params.crop_pixels
+                );
                 stabilized = stabilized(roi);
             }
 
@@ -107,6 +112,6 @@ cv::Mat VideoStabilizer::processFrame(const cv::Mat& inputFrame, int crop_pixels
         }
     }
 
-    // If no measurement was finalized this round, outputFrame remains empty
+    // If nothing was finalized, outputFrame is empty
     return outputFrame;
 }

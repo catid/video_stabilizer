@@ -50,6 +50,9 @@ int main() {
         return EXIT_FAILURE;
     }
 
+    VideoStabilizerParams params;
+    params.crop_pixels = 0; // Disable crop so we can see what it's doing
+
     // Iterate over each video file
     for (const auto& videoFile : videoFiles) {
         std::string inputPath = fs::path(inputDir) / videoFile;
@@ -68,7 +71,7 @@ int main() {
             std::cerr << "Warning: Unable to retrieve FPS for " << videoFile << ". Defaulting to 30 FPS." << std::endl;
             fps = 30.0; // Default FPS
         }
-        int crop = 0;
+        const int crop = params.crop_pixels;
         int frameWidth = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_WIDTH)) - crop * 2; // Crop both edges
         int frameHeight = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_HEIGHT)) - crop * 2; // Crop both edges
 
@@ -95,12 +98,12 @@ int main() {
         cv::Mat frame;
         cv::Mat processedFrame;
         int frameCount = 0;
-        VideoStabilizer stabilizer;
+        VideoStabilizer stabilizer(params);
 
         // Process each frame
         while (cap.read(frame)) {
             // Pass the frame to the processing function
-            processedFrame = stabilizer.processFrame(frame, crop);
+            processedFrame = stabilizer.processFrame(frame);
 
             // Write the processed frame to the output video
             writer.write(processedFrame);
