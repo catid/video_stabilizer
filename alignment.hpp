@@ -2,6 +2,41 @@
 
 #include "imgproc.hpp"
 
+struct VideoAlignerParams {
+    /*
+        Enable initialization from phase correlation.
+        This can be useful for handling fast camera pans.
+        Otherwise it's unlikely to be useful.
+    */
+    bool phase_correlate = false;
+    double phase_correlate_threshold = 0.5;
+
+    /*
+        There is a sweet spot for this threshold.
+        Too low: Will iterate too many times, accumulating errors until it diverges.
+        Too high: Will iterate too few times, creating visual errors and/or diverging more.
+    */
+    double threshold = 0.03;
+
+    /*
+        The smallest fraction of the image to use for the sparse set.
+        Too small: Will not find enough keypoints to do a good alignment.
+        Too large: Will accept too many false positives, and may not converge.
+    */
+    float smallest_fraction = 0.5f;
+
+    /*
+        The maximum number of iterations to run before giving up at each level.
+    */
+    int max_iters = 64;
+
+    /*
+        The minimum width or height of the image pyramid (smallest layer size).
+    */
+    int pyramid_min_width = 20;
+    int pyramid_min_height = 20;
+};
+
 /*
     (1) Keyframe every other frame
     (2) Use cv::phaseCorrelate to find the initial x/y shift guess
@@ -17,7 +52,7 @@ public:
     bool AlignNextFrame(
         const cv::Mat& frame,
         SimilarityTransform& transform,
-        bool phase_correlate = false);
+        const VideoAlignerParams& params = VideoAlignerParams());
 
 protected:
     // Alternating frame indexing
@@ -56,6 +91,6 @@ protected:
     Halide::Runtime::Buffer<double> IcaResult;
 
     // Returns false if this is the first frame
-    bool ComputePyramid(const cv::Mat& inputFrame);
+    bool ComputePyramid(const cv::Mat& inputFrame, const VideoAlignerParams& params);
     bool ComputeKeyFrame();
 };

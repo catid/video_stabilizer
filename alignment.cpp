@@ -146,7 +146,7 @@ private:
 #define TIME_FUNCTION(label) ;
 #endif
 
-bool VideoAligner::ComputePyramid(const cv::Mat& inputFrame) {
+bool VideoAligner::ComputePyramid(const cv::Mat& inputFrame, const VideoAlignerParams& params) {
     TIME_FUNCTION("ComputePyramid");
     
     int width = inputFrame.cols;
@@ -166,7 +166,7 @@ bool VideoAligner::ComputePyramid(const cv::Mat& inputFrame) {
             PyramidLevels++;
             width /= 2;
             height /= 2;
-        } while (width >= 20 && height >= 20);
+        } while (width >= params.pyramid_min_width && height >= params.pyramid_min_height);
 
         ScalePyramid[0].clear();
         ScalePyramid[1].clear();
@@ -334,7 +334,7 @@ static cv::Mat ComputeHessianFromSelected(
 bool VideoAligner::AlignNextFrame(
     const cv::Mat& inputFrame,
     SimilarityTransform& transform,
-    bool phase_correlate)
+    const VideoAlignerParams& params)
 {
 #ifdef ENABLE_PERFORMANCE_METRICS
     TIME_FUNCTION("AlignNextFrame");
@@ -345,7 +345,7 @@ bool VideoAligner::AlignNextFrame(
 
     {
         TIME_FUNCTION("ComputePyramidCall");
-        if (!ComputePyramid(inputFrame)) {
+        if (!ComputePyramid(inputFrame, params)) {
 #ifdef ENABLE_PERFORMANCE_METRICS
             double totalTime = PerformanceMetrics::getInstance().endTimer("TotalFrameTime");
             PerformanceMetrics::getInstance().logMetric("IncompleteFrame", totalTime);
@@ -366,7 +366,7 @@ bool VideoAligner::AlignNextFrame(
         }
     }
 
-    if (phase_correlate) {
+    if (params.phase_correlate) {
         TIME_FUNCTION("PhaseCorrelation");
 
         cv::Point2d detected_shift;
@@ -376,7 +376,7 @@ bool VideoAligner::AlignNextFrame(
         PerformanceMetrics::getInstance().logMetric("PhaseCorrelateResponse", response);
 #endif
 
-        if (response > 0.5) {
+        if (response > params.phase_correlate_threshold) {
             const float phase_layer_scale = (1 << PhaseLevel) / float(1 << PyramidLevels);
             transform.TX = detected_shift.x * phase_layer_scale;
             transform.TY = detected_shift.y * phase_layer_scale;
@@ -461,9 +461,8 @@ bool VideoAligner::AlignNextFrame(
         {
             TIME_FUNCTION("NthElement_" + std::to_string(i));
             
-            const float smallest_fraction = 0.5f;
             const size_t selected_count_x =
-                static_cast<size_t>(DeltaPixelsX.size() * smallest_fraction);
+                static_cast<size_t>(DeltaPixelsX.size() * params.smallest_fraction);
             std::nth_element(
                 DeltaPixelsX.begin(),
                 DeltaPixelsX.begin() + selected_count_x,
@@ -475,7 +474,7 @@ bool VideoAligner::AlignNextFrame(
             DeltaPixelsX.resize(selected_count_x);
             
             const size_t selected_count_y =
-                static_cast<size_t>(DeltaPixelsY.size() * smallest_fraction);
+                static_cast<size_t>(DeltaPixelsY.size() * params.smallest_fraction);
             std::nth_element(
                 DeltaPixelsY.begin(),
                 DeltaPixelsY.begin() + selected_count_y,
@@ -583,10 +582,9 @@ bool VideoAligner::AlignNextFrame(
             Hinv = H.inv(cv::DECOMP_SVD);
         }
 
-        const int max_iters = 64;
         int iterations_performed = 0;
         
-        for (int iter = 0; iter < max_iters; iter++) {
+        for (int iter = 0; iter < params.max_iters; iter++) {
             TIME_FUNCTION("ICAIteration_" + std::to_string(i) + "_" + std::to_string(iter));
             iterations_performed++;
 
@@ -656,17 +654,11 @@ bool VideoAligner::AlignNextFrame(
             PerformanceMetrics::getInstance().logMetric("Displacement_" + std::to_string(i) + "_" + std::to_string(iter), displacement);
 #endif
 
-            /*
-                There is a sweet spot for this threshold.
-                Too low: Will iterate too many times, accumulating errors until it diverges.
-                Too high: Will iterate too few times, creating visual errors and/or diverging more.
-            */
-            const double threshold = 0.03;
-            if (displacement < threshold) {
+            if (displacement < params.threshold) {
                 break;
             }
 
-            if (iter >= max_iters - 1) {
+            if (iter >= params.max_iters - 1) {
 #ifdef ENABLE_PERFORMANCE_METRICS
                 double totalTime = PerformanceMetrics::getInstance().endTimer("TotalFrameTime");
                 PerformanceMetrics::getInstance().logMetric("MaxIterationsExceeded", totalTime);
