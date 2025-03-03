@@ -20,10 +20,10 @@ struct VideoStabilizerParams {
     bool enable_ukf = false;
 
     // Crop pixels: if > 0, crop the output image by this amount
-    int crop_pixels = 16;
+    int crop_pixels = 32;
 
     // Displacement thresholds for decay and full reset
-    double min_disp = 24.0, max_disp = 64.0;
+    double min_disp = 32.0, max_disp = 96.0;
     double min_decay = 0.95, max_decay = 0.5;
 };
 
