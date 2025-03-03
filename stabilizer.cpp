@@ -18,9 +18,11 @@ cv::Mat VideoStabilizer::processFrame(const cv::Mat& inputFrame)
     SimilarityTransform currentMeas;
     bool success = aligner.AlignNextFrame(inputFrame, currentMeas, m_params.aligner);
 
+#if 0
     if (!success) {
         std::cout << "Alignment failed for frame " << m_frameIndex << std::endl;
     }
+#endif
 
     // 4) Update the UKF, which returns the earliest measurement that is
     //    now fully “smoothed” after seeing lag_ future measurements.
