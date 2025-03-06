@@ -678,7 +678,7 @@ bool VideoAligner::AlignNextFrame(
 #endif
 
         if (i > 0) {
-            // Move from half-resolution to full-resolution
+            // Move up the pyramid to 2x higher resolution
             transform.TX *= 2.0;
             transform.TY *= 2.0;
         }

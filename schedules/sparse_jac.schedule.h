@@ -19,7 +19,7 @@ inline void apply_schedule_sparse_jac(
     using ::Halide::TailStrategy;
     using ::Halide::Var;
     Func output_y = pipeline.get_func(5);
-    Func output_x = pipeline.get_func(3);
+    Func output_x = pipeline.get_func(2);
     Var v0(output_y.get_schedule().dims()[0].var);
     Var v0i("v0i");
     Var v1(output_y.get_schedule().dims()[1].var);

@@ -350,18 +350,20 @@ public:
 
         Expr scale = 1.f / grad_x.width();
 
+        // Sparse pixels selected based on grad_x should only use grad_x in calculation
         output_x(x, y, c) = mux(c, {
-            (grad_x(ix0, iy0) * ix0 + grad_y(ix0, iy0) * iy0) * scale,
-            (grad_x(ix0, iy0) * -iy0 + grad_y(ix0, iy0) * ix0) * scale,
-            (grad_x(ix0, iy0)),
-            (grad_y(ix0, iy0)),
+            2.f * grad_x(ix0, iy0) * ix0 * scale,
+            2.f * grad_x(ix0, iy0) * -iy0 * scale,
+            2.f * grad_x(ix0, iy0),
+            0.f,
         });
 
+        // Sparse pixels selected based on grad_y should only use grad_y in calculation
         output_y(x, y, c) = mux(c, {
-            (grad_x(ix1, iy1) * ix1 + grad_y(ix1, iy1) * iy1) * scale,
-            (grad_x(ix1, iy1) * -iy1 + grad_y(ix1, iy1) * ix1) * scale,
-            (grad_x(ix1, iy1)),
-            (grad_y(ix1, iy1)),
+            2.f * grad_y(ix1, iy1) * iy1 * scale,
+            2.f * grad_y(ix1, iy1) * ix1 * scale,
+            0.f,
+            2.f * grad_y(ix1, iy1),
         });
     }
 
