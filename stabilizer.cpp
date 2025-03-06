@@ -77,9 +77,7 @@ cv::Mat VideoStabilizer::processFrame(const cv::Mat& inputFrame)
 
         double decay = 1.0;
         if (displacement > m_params.max_disp) {
-            // Hard reset
-            reset = true;
-            newAccum = SimilarityTransform(); // identity
+            decay = m_params.max_decay;
         } else if (displacement > m_params.min_disp) {
             double f = (displacement - m_params.min_disp) / (m_params.max_disp - m_params.min_disp);
             f = std::max(0.0, std::min(1.0, f));
