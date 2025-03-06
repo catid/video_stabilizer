@@ -2,11 +2,11 @@
 
 Uses method described here: https://catid.io/posts/lk40years/
 
-There are some differences and improvements, primarily I've changed how I select the sparse set of pixels to use as keypoints: Now I select about 1000 keypoints with the largest X gradient and 1000 keypoints with the largest Y gradient, basically doubling the work but the result is about 10x fewer frame alignment errors.  My theory is that sometimes only large Y gradient pixels are selected so there is not enough X gradient information to do a good alignment.  By selecting the best pixels for x and y gradient across the whole image, it converges much more often.
+There are some differences and improvements, primarily I've changed how I select the sparse set of pixels to use as keypoints: Now I select about 1000 keypoints with the largest X gradient and 1000 keypoints with the largest Y gradient, basically doubling the work but the result is about 10x fewer frame alignment errors.  My theory is that sometimes only large Y gradient pixels are selected so there is not enough X gradient information to do a good alignment.  By selecting the best pixels for x and y gradient across the whole image, it converges much more often.  Furthermore, only calculating the Jacobian terms involving the X gradient for X gradient-selected pixels and similar for Y gradient-selected pixels improves alignment success by a further 3x.
 
 Phase correlation initialization is available but is disabled since it seems to make things worse (maybe a bug?)
 
-One thing that is worse is that I haven't managed to get a UKF working to estimate the camera intentional motion so there's a large amount of black pull-in artifacts that can be improved further.
+Intentional camera motion is estimated using an L1 optimizer with 10 frames of history and 3 frames of delay added to the video, rather than using a UKF.  This is done because the optimizer is parameterized by one value (lambda), and is much easier to get right.
 
 
 ## Setup

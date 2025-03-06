@@ -1,7 +1,7 @@
 #include "stabilizer.hpp"
 
 VideoStabilizer::VideoStabilizer(const VideoStabilizerParams& params)
-    : ukf(params.lag)
+    : m_l1Smoother(params.lag, params.smoother_memory, params.lambda)
 {
     m_params = params;
 }
@@ -24,12 +24,12 @@ cv::Mat VideoStabilizer::processFrame(const cv::Mat& inputFrame)
     }
 #endif
 
-    // 4) Update the UKF, which returns the earliest measurement that is
+    // 4) Update the smoother, which returns the earliest measurement that is
     //    now fully “smoothed” after seeing lag_ future measurements.
     bool reset = !success;
     SimilarityTransform earliestSmoothed;
-    if (m_params.enable_ukf) {
-        earliestSmoothed = ukf.update(currentMeas, reset);
+    if (m_params.enable_smoother) {
+        m_l1Smoother.update(currentMeas, earliestSmoothed);
     }
 
     // If alignment fails, we reset accum (like original code).
@@ -41,7 +41,7 @@ cv::Mat VideoStabilizer::processFrame(const cv::Mat& inputFrame)
     m_measurementBuffer.push_back(currentMeas);
 
     // 6) Check if we have finalized an old measurement
-    //    i.e. the UKF has done “lag” updates since that old measurement
+    //    i.e. the smoother has done “lag” updates since that old measurement
     bool hasFinalized = (m_measurementBuffer.size() > (size_t)m_params.lag);
 
     cv::Mat outputFrame; // empty unless we finalize
@@ -52,17 +52,8 @@ cv::Mat VideoStabilizer::processFrame(const cv::Mat& inputFrame)
         SimilarityTransform earliestMeas = m_measurementBuffer.front();
         m_measurementBuffer.pop_front();
 
-        // 6b) Either:
-        //
-        //     (A) No smoothing (just a 2-frame delay):
-        //         auto jitter = earliestMeas;
-        //
-        //     (B) Use the UKF’s smoothed difference:
-        //         auto jitter = earliestMeas.compose( earliestSmoothed.inverse() );
-        //
-        // Uncomment whichever approach you want:
         SimilarityTransform jitter;
-        if (m_params.enable_ukf) {
+        if (m_params.enable_smoother) {
             jitter = earliestMeas.compose( earliestSmoothed.inverse() );
         } else {
             jitter = earliestMeas;  // <-- (A) purely raw measurement

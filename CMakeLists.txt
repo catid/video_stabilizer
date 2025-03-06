@@ -92,8 +92,8 @@ add_library(imgproc SHARED
     tools.hpp
     stabilizer.cpp
     stabilizer.hpp
-    ukf.cpp
-    ukf.hpp
+    smoother.cpp
+    smoother.hpp
 )
 
 target_include_directories(imgproc
