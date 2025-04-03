@@ -51,7 +51,7 @@ int main() {
     }
 
     VideoStabilizerParams params;
-    params.crop_pixels = 0; // Disable crop so we can see what it's doing
+    //params.crop_pixels = 0; // Disable crop so we can see what it's doing
 
     // Iterate over each video file
     for (const auto& videoFile : videoFiles) {

@@ -23,7 +23,7 @@ struct VideoAlignerParams {
         Too small: Will not find enough keypoints to do a good alignment.
         Too large: Will accept too many false positives, and may not converge.
     */
-    float smallest_fraction = 0.5f;
+    float smallest_fraction = 0.8f;
 
     /*
         The maximum number of iterations to run before giving up at each level.

@@ -15,8 +15,8 @@ struct VideoStabilizerParams {
 
     // Lag: number of frames to delay before smoothing
     int lag = 3;
-    int smoother_memory = 8;
-    double lambda = 10.0;
+    int smoother_memory = 16;
+    double lambda = 80.0;
 
     // Enable smoother: if false, just use the aligner
     bool enable_smoother = true;
@@ -26,7 +26,7 @@ struct VideoStabilizerParams {
 
     // Displacement thresholds for decay and full reset
     double min_disp = 32.0, max_disp = 96.0;
-    double min_decay = 0.95, max_decay = 0.5;
+    double min_decay = 0.99, max_decay = 0.95;
 };
 
 class VideoStabilizer {

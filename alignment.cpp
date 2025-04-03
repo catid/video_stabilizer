@@ -457,39 +457,133 @@ bool VideoAligner::AlignNextFrame(
             }
         }
 
-        // Find the Subset of the DeltaPixels with the smallest abs_delta
+        const int tile_map_width = warpdiff_x.width(); // Width of the tile map (e.g., W/tile_size)
+        const int tile_map_height = warpdiff_x.height(); // Height of the tile map (e.g., H/tile_size)
+
+        // Define grid dimensions (3x3)
+        constexpr int grid_cols = 3;
+        constexpr int grid_rows = 3;
+        constexpr int num_grid_cells = grid_cols * grid_rows;
+
+        // Calculate grid cell boundaries (integer division is okay)
+        const int grid_cell_width = (tile_map_width + grid_cols - 1) / grid_cols; // Ceiling division
+        const int grid_cell_height = (tile_map_height + grid_rows - 1) / grid_rows; // Ceiling division
+
+        // Create vectors to hold DeltaPixels for each grid cell
+        std::vector<std::vector<DeltaPixel>> grid_delta_pixels_x(num_grid_cells);
+        std::vector<std::vector<DeltaPixel>> grid_delta_pixels_y(num_grid_cells);
+
+        // --- Grid-Based Pixel Selection ---
         {
-            TIME_FUNCTION("NthElement_" + std::to_string(i));
-            
-            const size_t selected_count_x =
-                static_cast<size_t>(DeltaPixelsX.size() * params.smallest_fraction);
-            std::nth_element(
-                DeltaPixelsX.begin(),
-                DeltaPixelsX.begin() + selected_count_x,
-                DeltaPixelsX.end(),
-                [](const DeltaPixel &lhs, const DeltaPixel &rhs) {
-                    return lhs.abs_delta < rhs.abs_delta;
+            TIME_FUNCTION("GridSelectionSetup_" + std::to_string(i));
+
+            // Distribute DeltaPixels into grid cells
+            for (int ty = 0; ty < tile_map_height; ++ty) {
+                for (int tx = 0; tx < tile_map_width; ++tx) {
+                    // Determine grid cell index
+                    int grid_col_idx = std::min(tx / grid_cell_width, grid_cols - 1);
+                    int grid_row_idx = std::min(ty / grid_cell_height, grid_rows - 1);
+                    int grid_index = grid_row_idx * grid_cols + grid_col_idx;
+
+                    // Add to X grid
+                    DeltaPixel dp_x;
+                    dp_x.abs_delta = std::abs(warpdiff_x(tx, ty)); // Use absolute difference
+                    dp_x.tile_x = static_cast<uint16_t>(tx);
+                    dp_x.tile_y = static_cast<uint16_t>(ty);
+                    if (grid_index >= 0 && grid_index < num_grid_cells) {
+                         grid_delta_pixels_x[grid_index].push_back(dp_x);
+                    }
+
+                    // Add to Y grid
+                    DeltaPixel dp_y;
+                    dp_y.abs_delta = std::abs(warpdiff_y(tx, ty)); // Use absolute difference
+                    dp_y.tile_x = static_cast<uint16_t>(tx);
+                    dp_y.tile_y = static_cast<uint16_t>(ty);
+                     if (grid_index >= 0 && grid_index < num_grid_cells) {
+                         grid_delta_pixels_y[grid_index].push_back(dp_y);
+                    }
                 }
-            );
-            DeltaPixelsX.resize(selected_count_x);
-            
-            const size_t selected_count_y =
-                static_cast<size_t>(DeltaPixelsY.size() * params.smallest_fraction);
-            std::nth_element(
-                DeltaPixelsY.begin(),
-                DeltaPixelsY.begin() + selected_count_y,
-                DeltaPixelsY.end(),
-                [](const DeltaPixel &lhs, const DeltaPixel &rhs) {
-                    return lhs.abs_delta < rhs.abs_delta;
+            }
+
+            // Clear the main DeltaPixel vectors before repopulating
+            DeltaPixelsX.clear();
+            DeltaPixelsY.clear();
+
+            // Reserve space roughly based on expectation to reduce reallocations
+            size_t expected_total_x = static_cast<size_t>(tile_map_width * tile_map_height * params.smallest_fraction);
+            size_t expected_total_y = static_cast<size_t>(tile_map_width * tile_map_height * params.smallest_fraction);
+            DeltaPixelsX.reserve(expected_total_x + num_grid_cells); // Add slack for min 1 per cell
+            DeltaPixelsY.reserve(expected_total_y + num_grid_cells);
+        }
+        {
+            TIME_FUNCTION("GridNthElement_" + std::to_string(i));
+            size_t total_selected_x = 0;
+            size_t total_selected_y = 0;
+
+            // Select smallest fraction from each grid cell
+            for (int cell_idx = 0; cell_idx < num_grid_cells; ++cell_idx) {
+                // Process X grid cell
+                auto& cell_x = grid_delta_pixels_x[cell_idx];
+                if (!cell_x.empty()) {
+                    // Calculate number to select (at least 1 if possible, up to cell size)
+                    size_t num_in_cell_x = cell_x.size();
+                    size_t num_to_select_x = std::max(1UL, static_cast<size_t>(num_in_cell_x * params.smallest_fraction));
+                    num_to_select_x = std::min(num_to_select_x, num_in_cell_x);
+
+                    // Use nth_element to partition
+                    std::nth_element(
+                        cell_x.begin(),
+                        cell_x.begin() + num_to_select_x,
+                        cell_x.end(),
+                        [](const DeltaPixel &lhs, const DeltaPixel &rhs) {
+                            return lhs.abs_delta < rhs.abs_delta;
+                        }
+                    );
+
+                    // Add the selected elements to the main vector
+                    DeltaPixelsX.insert(DeltaPixelsX.end(), cell_x.begin(), cell_x.begin() + num_to_select_x);
+                    total_selected_x += num_to_select_x;
                 }
-            );
-            DeltaPixelsY.resize(selected_count_y);
+
+                // Process Y grid cell
+                auto& cell_y = grid_delta_pixels_y[cell_idx];
+                if (!cell_y.empty()) {
+                    // Calculate number to select
+                    size_t num_in_cell_y = cell_y.size();
+                    size_t num_to_select_y = std::max(1UL, static_cast<size_t>(num_in_cell_y * params.smallest_fraction));
+                    num_to_select_y = std::min(num_to_select_y, num_in_cell_y);
+
+                    // Use nth_element
+                    std::nth_element(
+                        cell_y.begin(),
+                        cell_y.begin() + num_to_select_y,
+                        cell_y.end(),
+                        [](const DeltaPixel &lhs, const DeltaPixel &rhs) {
+                            return lhs.abs_delta < rhs.abs_delta;
+                        }
+                    );
+
+                    // Add selected elements
+                    DeltaPixelsY.insert(DeltaPixelsY.end(), cell_y.begin(), cell_y.begin() + num_to_select_y);
+                    total_selected_y += num_to_select_y;
+                }
+            }
 
 #ifdef ENABLE_PERFORMANCE_METRICS
-            PerformanceMetrics::getInstance().logMetric("SelectedPointsX_" + std::to_string(i), selected_count_x);
-            PerformanceMetrics::getInstance().logMetric("SelectedPointsY_" + std::to_string(i), selected_count_y);
+            PerformanceMetrics::getInstance().logMetric("SelectedPointsX_Grid_" + std::to_string(i), total_selected_x);
+            PerformanceMetrics::getInstance().logMetric("SelectedPointsY_Grid_" + std::to_string(i), total_selected_y);
 #endif
-        }
+            // Check if enough points were selected
+             if (total_selected_x < 4 || total_selected_y < 4 ) { // Need at least 4 points for Hessian/ICA
+                 std::cerr << "Warning: Insufficient points selected after grid filtering at level " << i
+                           << " (X: " << total_selected_x << ", Y: " << total_selected_y << "). Skipping level or failing." << std::endl;
+                 // Option 1: Continue to next level (might work if higher levels have enough)
+                 // continue;
+                 // Option 2: Return failure
+                  return false;
+             }
+
+        } // End of Grid Selection block
 
         {
             TIME_FUNCTION("BufferSetup_" + std::to_string(i));
@@ -648,7 +742,7 @@ bool VideoAligner::AlignNextFrame(
             ul1 = ul2, ur1 = ur2, ll1 = ll2, lr1 = lr2;
 
 #ifdef ENABLE_PERFORMANCE_METRICS
-            PerformanceMetrics::getInstance().logMetric("Displacement_" + std::to_string(i) + "_" + std::to_string(iter), displacement);
+            PerformanceMetrics::getInstance().logMetric("Displacement_" + std::to_string(i) + "_" + std::to_string(iter), displacement12);
 #endif
 
             if (displacement12 < params.threshold) {
