@@ -15,7 +15,13 @@ struct VideoAlignerParams {
         This can be useful for handling fast camera pans.
         Otherwise it's unlikely to be useful.
     */
-    bool phase_correlate = true;           // Seed IC with phase correlation
+    // Disable phase‑correlation seeding by default.  While phase correlation can
+    // help with large, purely‑translational motion, in practice it can
+    // occasionally produce an inaccurate initial estimate that delays or even
+    // breaks convergence of the sparse‑ICA refinement step.  For most typical
+    // camera motion (especially when rotation is present) starting from the
+    // identity transform is more stable, so we now default this flag to false.
+    bool phase_correlate = false;           // Seed IC with phase correlation
     double phase_correlate_threshold = 0.55; // PhaseCorr response threshold
 
     /*
@@ -43,8 +49,12 @@ struct VideoAlignerParams {
         The minimum width or height for the smallest level in the image pyramid.
         Stops generating pyramid levels smaller than this.
     */
-    int pyramid_min_width = 20;
-    int pyramid_min_height = 20;
+    // Do not generate extremely small (<=32 px) pyramid levels – they often
+    // contain too few valid gradient maxima which leads to a poorly‑conditioned
+    // Hessian and diverging updates.  Increasing the minimum size keeps the
+    // coarsest level stable without noticeably affecting runtime.
+    int pyramid_min_width = 32;
+    int pyramid_min_height = 32;
 
     /*
         Maximum allowed displacement of any image corner after convergence at a

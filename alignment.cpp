@@ -206,8 +206,14 @@ bool VideoAligner::ComputePyramid(const cv::Mat& inputFrame, const VideoAlignerP
     if (ScalePyramid[0].empty() || width != LastWidth || height != LastHeight || PyramidLevels < 1) {
         TIME_FUNCTION("ComputePyramid_Setup");
 
-        CurrFrameIndex = 0; // Start fresh
-        PrevFrameIndex = 1;
+        // Start with the *very first* image being stored in the key‑frame slot
+        // so that subsequent frames are always compared against this reference
+        // image.  Using the opposite ordering (current=0, keyframe=1) caused
+        // the roles of template and key‑frame to be swapped on the first
+        // alignment pair which led to an ill‑conditioned Hessian and early
+        // divergence.
+        CurrFrameIndex = KeyframeIndex;      // 1
+        PrevFrameIndex = NonKeyframeIndex;   // 0
         FramesAccumulated = 0;
         LastWidth = width;
         LastHeight = height;

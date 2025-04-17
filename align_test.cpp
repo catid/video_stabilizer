@@ -634,13 +634,13 @@ int AlignImagePair()
 
     // 1) Load template (reference) image and input image.
     //    We assume template.png and input.png exist in the current directory.
-    cv::Mat templateImg = cv::imread("../../template.png", cv::IMREAD_COLOR);
+    cv::Mat templateImg = cv::imread("../template.png", cv::IMREAD_COLOR);
     if (templateImg.empty()) {
         std::cerr << "Error: Could not load template.png\n";
         return 1;
     }
 
-    cv::Mat inputImg = cv::imread("../../input.png", cv::IMREAD_COLOR);
+    cv::Mat inputImg = cv::imread("../input.png", cv::IMREAD_COLOR);
     if (inputImg.empty()) {
         std::cerr << "Error: Could not load input.png\n";
         return 1;
