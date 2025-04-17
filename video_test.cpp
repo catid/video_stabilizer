@@ -7,12 +7,45 @@
 
 namespace fs = std::filesystem;
 
-int main() {
-    // Define input and output directories
-    std::string inputDir = "../recordings";
-    std::string outputDir = "output";
+int main(int argc, char** argv) {
+    // ---------------- Command‑line arguments ----------------
+    // Very light‑weight parsing for a handful of flags; unknown flags are ignored.
 
-    // Create the output directory if it doesn't exist
+    std::string inputDir  = "../recordings";
+    std::string outputDir = "output";
+    std::string singleFile;
+
+    VideoStabilizerParams params; // uses tuned defaults
+
+    for (int i = 1; i < argc; ++i)
+    {
+        std::string arg = argv[i];
+
+        auto next = [&](double &dst){ if(i+1<argc) dst = std::stod(argv[++i]); };
+        auto nextInt = [&](int &dst){ if(i+1<argc) dst = std::stoi(argv[++i]); };
+
+        if (arg == "--input")      { if(i+1<argc) inputDir  = argv[++i]; }
+        else if (arg == "--output") { if(i+1<argc) outputDir = argv[++i]; }
+        else if (arg == "--file")      { if(i+1<argc) singleFile = argv[++i]; }
+        else if (arg == "--threshold")          next(params.aligner.threshold);
+        else if (arg == "--smallest_fraction") {
+            if (i+1<argc) params.aligner.smallest_fraction = std::stof(argv[++i]);
+        }
+        else if (arg == "--phase_corr") {
+            params.aligner.phase_correlate = true;
+            if(i+1<argc && argv[i+1][0] != '-') next(params.aligner.phase_correlate_threshold);
+        }
+        else if (arg == "--max_iters")          nextInt(params.aligner.max_iters);
+        else if (arg == "--lambda")             next(params.lambda);
+        else if (arg == "--crop")               nextInt(params.crop_pixels);
+        else if (arg == "--lag")                nextInt(params.lag);
+        // silently ignore unknown flags so the script can pass extras
+    }
+
+    // Clamp some params to sane bounds
+    params.aligner.smallest_fraction = std::max(0.05f, std::min(0.9f, params.aligner.smallest_fraction));
+
+    // Create the output directory if it doesn't exist (may be relative to cwd)
     try {
         if (!fs::exists(outputDir)) {
             fs::create_directory(outputDir);
@@ -25,37 +58,41 @@ int main() {
         return EXIT_FAILURE;
     }
 
-    // Collect all .mp4 files in the input directory
     std::vector<std::string> videoFiles;
-    try {
-        if (!fs::exists(inputDir) || !fs::is_directory(inputDir)) {
-            std::cerr << "Error: Input directory does not exist or is not a directory.\n";
+
+    if (!singleFile.empty()) {
+        // Use only the specified file
+        videoFiles.push_back(singleFile);
+    } else {
+        // Collect all .mp4 files in the input directory
+        try {
+            if (!fs::exists(inputDir) || !fs::is_directory(inputDir)) {
+                std::cerr << "Error: Input directory does not exist or is not a directory.\n";
+                return EXIT_FAILURE;
+            }
+
+            for (const auto& entry : fs::directory_iterator(inputDir)) {
+                if (entry.is_regular_file() && entry.path().extension() == ".mp4") {
+                    videoFiles.push_back(entry.path().filename().string());
+                }
+            }
+        } catch (const fs::filesystem_error& e) {
+            std::cerr << "Error reading input directory: " << e.what() << std::endl;
             return EXIT_FAILURE;
         }
 
-        for (const auto& entry : fs::directory_iterator(inputDir)) {
-            if (entry.is_regular_file() && entry.path().extension() == ".mp4") {
-                // Store the filename (or the full path if you prefer)
-                videoFiles.push_back(entry.path().filename().string());
-            }
+        if (videoFiles.empty()) {
+            std::cerr << "No .mp4 files found in the input directory: " << inputDir << std::endl;
+            return EXIT_FAILURE;
         }
-    } catch (const fs::filesystem_error& e) {
-        std::cerr << "Error reading input directory: " << e.what() << std::endl;
-        return EXIT_FAILURE;
     }
 
-    // If no .mp4 files are found, exit early
-    if (videoFiles.empty()) {
-        std::cerr << "No .mp4 files found in the input directory: " << inputDir << std::endl;
-        return EXIT_FAILURE;
-    }
-
-    VideoStabilizerParams params;
-    params.crop_pixels = 0; // Disable crop so we can see what it's doing
+    // 'params' already initialised from command‑line flags earlier.
 
     // Iterate over each video file
     for (const auto& videoFile : videoFiles) {
-        std::string inputPath = fs::path(inputDir) / videoFile;
+        std::string inputPath = singleFile.empty() ? (fs::path(inputDir) / videoFile).string()
+                                                  : videoFile;
         std::cout << "\nProcessing video: " << inputPath << std::endl;
 
         // Open the video file
@@ -78,7 +115,7 @@ int main() {
         int fourcc = cv::VideoWriter::fourcc('x', '2', '6', '4');
 
         // Define output video path
-        std::string outputPath = fs::path(outputDir) / ("processed_" + videoFile);
+        std::string outputPath = fs::path(outputDir) / ("processed_" + fs::path(videoFile).filename().string());
 
         // Initialize VideoWriter
         cv::VideoWriter writer;

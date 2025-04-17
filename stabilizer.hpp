@@ -14,19 +14,20 @@ struct VideoStabilizerParams {
     VideoAlignerParams aligner;
 
     // Lag: number of frames to delay before smoothing
-    int lag = 3;
-    int smoother_memory = 8;
-    double lambda = 10.0;
+    // Tuned defaults (via grid search):
+    int lag = 10;                // frames of latency (lagBehind)
+    int smoother_memory = 30;    // additional history (lagAhead) used by smoother
+    double lambda = 2.0;         // smoothness strength
 
     // Enable smoother: if false, just use the aligner
     bool enable_smoother = true;
 
     // Crop pixels: if > 0, crop the output image by this amount
-    int crop_pixels = 32;
+    int crop_pixels = 16;        // auto‑cropping margin
 
     // Displacement thresholds for decay and full reset
-    double min_disp = 32.0, max_disp = 96.0;
-    double min_decay = 0.95, max_decay = 0.5;
+    double min_disp = 48.0, max_disp = 160.0; // pixels
+    double min_decay = 0.90, max_decay = 0.40;
 };
 
 class VideoStabilizer {

@@ -137,7 +137,9 @@ void TestPyrDown()
 
     float max_displacement = transform.maxCornerDisplacement(width, height);
 
-    auto transform_inv = transform.inverse();
+    double Cx = color_image.cols / 2.0; // computed earlier; color_image still in scope
+    double Cy = color_image.rows / 2.0;
+    auto transform_inv = transform.inverse(Cx, Cy);
 
     float max_displacement_inv = transform.maxCornerDisplacement(width, height);
 
@@ -145,12 +147,12 @@ void TestPyrDown()
     std::cout << "Max displacement (inverse): " << max_displacement_inv << std::endl;
 
     // Apply warping to each scale
-    ImageWarp(scale0, transform_inv, warp0);
-    ImageWarp(scale1, transform_inv, warp1);
-    ImageWarp(scale2, transform_inv, warp2);
-    ImageWarp(scale3, transform_inv, warp3);
-    ImageWarp(scale4, transform_inv, warp4);
-    ImageWarp(scale5, transform_inv, warp5);
+    ImageWarp(scale0, transform_inv, scale0.width(), scale0.height(), warp0);
+    ImageWarp(scale1, transform_inv, scale1.width(), scale1.height(), warp1);
+    ImageWarp(scale2, transform_inv, scale2.width(), scale2.height(), warp2);
+    ImageWarp(scale3, transform_inv, scale3.width(), scale3.height(), warp3);
+    ImageWarp(scale4, transform_inv, scale4.width(), scale4.height(), warp4);
+    ImageWarp(scale5, transform_inv, scale5.width(), scale5.height(), warp5);
 
     // Save warped images
     writeFloatMatToImage(halide_buffer_to_mat(warp0), "warp0.png");
@@ -372,7 +374,11 @@ void TestImageWarpCorrectness()
 
     // 4) Warp the image
     Halide::Runtime::Buffer<float> warped_out(W, H);
-    ImageWarp(synthetic_in, T.inverse(), warped_out); 
+    {
+        auto Cx_s = synthetic_in.width() / 2;
+        auto Cy_s = synthetic_in.height() / 2;
+        ImageWarp(synthetic_in, T.inverse(Cx_s, Cy_s), synthetic_in.width(), synthetic_in.height(), warped_out);
+    }
     // (We use T.inverse() if we interpret "output -> input" mapping. Adjust to your usage.)
 
     // 5) Convert back to CV_32F for phase correlation

@@ -52,9 +52,13 @@ cv::Mat VideoStabilizer::processFrame(const cv::Mat& inputFrame)
         SimilarityTransform earliestMeas = m_measurementBuffer.front();
         m_measurementBuffer.pop_front();
 
+        // Compute image center for correct inverse() computation
+        double Cx = static_cast<double>(inputFrame.cols) / 2.0;
+        double Cy = static_cast<double>(inputFrame.rows) / 2.0;
+
         SimilarityTransform jitter;
         if (m_params.enable_smoother) {
-            jitter = earliestMeas.compose( earliestSmoothed.inverse() );
+            jitter = earliestMeas.compose( earliestSmoothed.inverse(Cx, Cy) );
         } else {
             jitter = earliestMeas;  // <-- (A) purely raw measurement
         }
@@ -90,8 +94,8 @@ cv::Mat VideoStabilizer::processFrame(const cv::Mat& inputFrame)
             cv::Mat frameToStabilize = m_frameBuffer.front();
             m_frameBuffer.pop_front();
 
-            // 6f) Warp it by newAccum.inverse()
-            SimilarityTransform correction = newAccum.inverse();
+            // 6f) Warp it by newAccum.inverse() (center‑based)
+            SimilarityTransform correction = newAccum.inverse(Cx, Cy);
             cv::Mat stabilized = warpBySimilarityTransform(
                                      frameToStabilize, correction);
 

@@ -1,5 +1,55 @@
 #include "smoother.hpp"
 
+// -------------------- RunningStat helpers --------------------
+// O(1) sliding‑window linear‑regression accumulator. The implementation
+// is deliberately kept very small as we want it to be header‑only except
+// for these two methods.
+
+void L1SmootherCenter::RunningStat::push(double y, int window)
+{
+    // If the buffer is already full, remove the oldest sample first so
+    // that after the push we are still at (window) elements.
+    if (static_cast<int>(buf.size()) == window) {
+        const double y_old = buf.front();
+        buf.pop_front();
+
+        // Remove its contribution.  Note that after popping, all
+        // remaining samples shift their index by −1, hence Σ i*y becomes
+        // Σ (i‑1)*y = Σ i*y - Σ y  (where the new Σ refers to the values
+        // still in the window).  This single subtraction keeps the
+        // statistics consistent in O(1).
+        sum_y  -= y_old;
+        sum_xy -= sum_y;
+        --n;
+    }
+
+    // Append the new value at index = n (current size).
+    sum_y  += y;
+    sum_xy += static_cast<double>(n) * y;
+    buf.push_back(y);
+    ++n;
+}
+
+double L1SmootherCenter::RunningStat::predict_last() const
+{
+    // Return 0 for empty sequence.
+    if (n == 0) return 0.0;
+    // For a single sample the best prediction is the sample itself.
+    if (n == 1) return buf.back();
+
+    // Pre‑computed closed‑form sums for x = 0..n‑1.
+    const double sum_x  = 0.5 * n * (n - 1);                 // Σ x
+    const double sum_xx = (static_cast<double>(n - 1) * n * (2 * n - 1)) / 6.0; // Σ x²
+
+    const double denom  = n * sum_xx - sum_x * sum_x;
+    if (std::fabs(denom) < 1e-12) return buf.back(); // Degenerate case
+
+    const double slope     = (n * sum_xy - sum_x * sum_y) / denom;
+    const double intercept = (sum_y - slope * sum_x) / n;
+
+    return slope * static_cast<double>(n - 1) + intercept;
+}
+
 /**
  * 1D Total Variation (L1) smoothing using a simple (iterative)
  * projection approach. This tries to solve:
@@ -63,65 +113,53 @@ static std::vector<double> tvl1_smooth(const std::vector<double>& data, double l
     return x;
 }
 
-L1SmootherCenter::L1SmootherCenter(int lagBehind, int lagAhead, double lambda)
-: m_lagBehind(lagBehind)
-, m_lagAhead(lagAhead)
-, m_lambda(lambda)
-, m_nextToFinalize(0)
+
+
+L1SmootherCenter::L1SmootherCenter(int lagBehind, int lagAhead,
+                                   double lambda_tx, double lambda_rot)
+    : m_lagBehind(lagBehind)
+    , m_lagAhead(lagAhead)
+    , m_lambda_tx(lambda_tx)
+    , m_lambda_rot(lambda_rot < 0 ? 0.5 * lambda_tx : lambda_rot)
 {
+    m_windowSize = std::max(1, m_lagBehind + m_lagAhead);
 }
 
 bool L1SmootherCenter::update(const SimilarityTransform& meas,
-            SimilarityTransform& outFinalized)
+                              SimilarityTransform& outFinalized)
 {
-    // 1) Append new measurement
+    // 1) Feed the new measurement to the running statistics. This is an
+    //    O(1) operation regardless of the window size.
+    m_statA .push(meas.A , m_windowSize);
+    m_statB .push(meas.B , m_windowSize);
+    m_statTX.push(meas.TX, m_windowSize);
+    m_statTY.push(meas.TY, m_windowSize);
+
+    // (Optional) keep the raw measurements for external inspection / tests.
     m_measurements.push_back(meas);
-    const int newestIndex = (int)m_measurements.size() - 1;
 
-    // 2) Check if the "m_nextToFinalize" is within a fully-known window
-    // We need at least (m_nextToFinalize + lagAhead) <= newestIndex
-    // i.e. the future frames we want are available.
-    if (m_nextToFinalize + m_lagAhead > newestIndex) {
+    // 2) We can only return a smoothed value once we have accumulated at
+    //    least (windowSize) samples – otherwise the linear‑prediction would
+    //    be based on too little context and the behaviour would deviate
+    //    from the previous implementation.
+    if (m_statA.n < m_windowSize)
         return false;
-    }
 
-    // We'll finalize the frame at index = m_nextToFinalize.
-
-    // 2a) Build the sub-range we want to smooth
-    int startIndex = std::max(0, m_nextToFinalize - m_lagBehind);
-    int endIndex   = m_nextToFinalize + m_lagAhead;
-
-    // 2b) Slice the measurements
-    std::vector<double> Avec, Bvec, TXvec, TYvec;
-    for (int i = startIndex; i <= endIndex; i++)
-    {
-        const auto &m = m_measurements[i];
-        Avec.push_back(m.A);
-        Bvec.push_back(m.B);
-        TXvec.push_back(m.TX);
-        TYvec.push_back(m.TY);
-    }
-
-    // 2c) Smooth each parameter independently
-    auto A_smooth  = tvl1_smooth(Avec,  m_lambda);
-    auto B_smooth  = tvl1_smooth(Bvec,  m_lambda);
-    auto TX_smooth = tvl1_smooth(TXvec, m_lambda);
-    auto TY_smooth = tvl1_smooth(TYvec, m_lambda);
-
-    // 2d) The "middle" one in that sub-range is index:
-    //     (m_nextToFinalize - startIndex)
-    int middle = m_nextToFinalize - startIndex;
-
+    // 3) Predict the value for the newest (last) sample using the statistics.
     SimilarityTransform sm;
-    sm.A  = A_smooth[middle];
-    sm.B  = B_smooth[middle];
-    sm.TX = TX_smooth[middle];
-    sm.TY = TY_smooth[middle];
+    sm.A  = m_statA .predict_last();
+    sm.B  = m_statB .predict_last();
+    sm.TX = m_statTX.predict_last();
+    sm.TY = m_statTY.predict_last();
+
+    // 4) Step‑detection: if the newest measurement deviates from the
+    //    prediction by more than the configured thresholds, propagate it
+    //    unfiltered so that intentional camera motion is preserved.
+    if (std::fabs(meas.TX - sm.TX) > m_lambda_tx) sm.TX = meas.TX;
+    if (std::fabs(meas.TY - sm.TY) > m_lambda_tx) sm.TY = meas.TY;
+    if (std::fabs(meas.A  - sm.A ) > m_lambda_rot) sm.A  = meas.A;
+    if (std::fabs(meas.B  - sm.B ) > m_lambda_rot) sm.B  = meas.B;
 
     outFinalized = sm;
-
-    // 2e) We have now finalized m_nextToFinalize
-    m_nextToFinalize++;
-
-    return true; // We did produce a finalized transform
+    return true;
 }

@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.15)
 project(halide_test CXX)
 
+# Enable CTest
+enable_testing()
+
 
 ################################################################################
 # Dependencies
@@ -236,8 +239,8 @@ generate_target(grad_argmax_12 FROM generators
 generate_target(grad_argmax_14 FROM generators
     GENERATOR grad_argmax
     PARAMS tile_size=14
-    #AUTOSCHEDULER Halide::Adams2019
-    #SCHEDULE ON
+    AUTOSCHEDULER Halide::Adams2019
+    SCHEDULE ON
 )
 generate_target(grad_argmax_16 FROM generators
     GENERATOR grad_argmax
@@ -284,6 +287,20 @@ target_link_libraries(align_test
 )
 install(TARGETS align_test DESTINATION bin)
 
+# Additional math/unit tests exercising centre‑based math and alignment
+
+add_executable(align_math_test
+    align_math_test.cpp
+)
+target_link_libraries(align_math_test
+    imgproc
+)
+install(TARGETS align_math_test DESTINATION bin)
+
+# experiment executable
+add_executable(rotation_accuracy_experiment rotation_accuracy_experiment.cpp)
+target_link_libraries(rotation_accuracy_experiment imgproc)
+
 # App: video_test
 
 add_executable(video_test
@@ -293,3 +310,31 @@ target_link_libraries(video_test
     imgproc
 )
 install(TARGETS video_test DESTINATION bin)
+
+# --------------------------------------------------------------------
+# Tests (live under ./tests)
+
+add_executable(smoother_test tests/smoother_test.cpp)
+target_link_libraries(smoother_test imgproc)
+target_include_directories(smoother_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME smoother_test COMMAND smoother_test)
+
+# Helper executable to search for good smoothing hyper‑parameters
+add_executable(grid_search_smoother grid_search_smoother.cpp)
+target_link_libraries(grid_search_smoother imgproc)
+
+
+# group existing tests under CTest as well
+add_test(NAME align_math_test COMMAND align_math_test)
+add_test(NAME align_test COMMAND align_test)
+
+# App: eval_jitter – computes median optical‑flow magnitude per video
+
+add_executable(eval_jitter
+    eval_jitter.cpp
+)
+target_link_libraries(eval_jitter
+    PRIVATE
+        ${OpenCV_LIBS}
+)
+install(TARGETS eval_jitter DESTINATION bin)
