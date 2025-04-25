@@ -66,10 +66,13 @@ bool SparseICA(
         selected_pixels_y,
         selected_jacobians_x,
         selected_jacobians_y,
-        transform.A,
-        transform.B,
-        transform.TX,
-        transform.TY,
+        static_cast<float>(transform.A),
+        static_cast<float>(transform.B),
+        // Convert center-based translation to UL-based for the kernel
+        static_cast<float>(transform.TX - transform.A * (input_template.width()*0.5f) +
+                                              transform.B * (input_template.height()*0.5f)),
+        static_cast<float>(transform.TY - transform.B * (input_template.width()*0.5f) -
+                                              transform.A * (input_template.height()*0.5f)),
         output);
     return r == 0;
 }
@@ -92,10 +95,12 @@ bool SparseWarpDiff(
         input_template,
         input_keyframe,
         local_max,
-        transform.A,
-        transform.B,
-        transform.TX,
-        transform.TY,
+        static_cast<float>(transform.A),
+        static_cast<float>(transform.B),
+        static_cast<float>(transform.TX - transform.A * (input_template.width()*0.5f) +
+                                          transform.B * (input_template.height()*0.5f)),
+        static_cast<float>(transform.TY - transform.B * (input_template.width()*0.5f) -
+                                          transform.A * (input_template.height()*0.5f)),
         output);
     return r == 0;
 }
@@ -113,7 +118,17 @@ bool ImageWarp(
     const SimilarityTransform& transform,
     Halide::Runtime::Buffer<float>& output)
 {
-    int r = image_warp(input, transform.A, transform.B, transform.TX, transform.TY, output);
+    // The Halide-generated kernel expects the translation component to be
+    // specified with respect to the origin (upper-left).  Convert the provided
+    // center-based (TX,TY) into the equivalent origin-based translation.
+
+    double cx = (input.width()  - 1) * 0.5; // width and height are at least 1
+    double cy = (input.height() - 1) * 0.5;
+
+    double tx_ul = transform.TX - transform.A * cx + transform.B * cy;
+    double ty_ul = transform.TY - transform.B * cx - transform.A * cy;
+
+    int r = image_warp(input, transform.A, transform.B, tx_ul, ty_ul, output);
     return r == 0;
 }
 
@@ -318,28 +333,24 @@ std::string SimilarityTransform::toString() const {
 SimilarityTransform SimilarityTransform::inverse() const
 {
     // The forward matrix is M = [[p, -q], [q, p]], with p=(1+A), q=B
-    // We want M^-1 plus the translation that inverts (TX,TY).
+    // We want M^-1 plus the translation that inverts (TX,TY).  In the
+    // center-pivot parameterization, the translation component t = (TX,TY)
+    // is applied *after* the rotation about the center, so the inverse just
+    // needs to apply the inverse rotation to -t.
     double p = 1.0 + A;   // (1 + A)
     double q = B;
     double denom = p * p + q * q; // (p^2 + q^2)
 
     // (1 + A_inv) = p / denom
     // B_inv       = - q / denom
-    // TX_inv, TY_inv come from applying M^-1 to (-TX, -TY)
-    //
-    // x = (1 + A_inv)*x' - B_inv*y' + TX_inv
-    // y = B_inv*x' + (1 + A_inv)*y' + TY_inv
 
     SimilarityTransform Tinv;
-    Tinv.A  = (p / denom) - 1.0;    // => (1 + A_inv) = p/denom
-    Tinv.B  = - q / denom;         // => B_inv = -q/denom
+    Tinv.A  = (p / denom) - 1.0;   // (1 + A_inv) = p/denom
+    Tinv.B  = -q / denom;          // B_inv = -q/denom
 
-    // Now for the translation component:
-    // M^-1 * ( -TX, -TY ) = (1/denom)* [ [p, q], [-q, p] ] * [(-TX), (-TY)]
-    double minusTx = -TX;
-    double minusTy = -TY;
-    double invX = ( p * minusTx +  q * minusTy ) / denom;
-    double invY = (-q * minusTx +  p * minusTy ) / denom;
+    // Translation: t_inv = - R_inv * t
+    double invX = (-p * TX - q * TY) / denom;
+    double invY = ( q * TX - p * TY) / denom;
 
     Tinv.TX = invX;
     Tinv.TY = invY;
@@ -382,6 +393,23 @@ Point SimilarityTransform::warp(Point p) const {
     return W;
 }
 
+// Warp with an explicit center of rotation (cx, cy). The parameters (A, B)
+// represent scale+rotation exactly as in warp(), but the rotation is applied
+// about the point (cx, cy) rather than the origin. After rotation/scale, an
+// additional translation (TX, TY) is applied. When (cx, cy) == (0,0) this is
+// equivalent to warp().
+Point SimilarityTransform::warp(Point p, double cx, double cy) const {
+    // Translate to center, apply rotation+scale, translate back, then translate
+    // by (TX, TY).
+    double px = p.x - cx;
+    double py = p.y - cy;
+
+    Point W;
+    W.x = (1 + A) * px - B * py + cx + TX;
+    W.y = B * px + (1 + A) * py + cy + TY;
+    return W;
+}
+
 double Point::distance(const Point& p) const {
     double dx = x - p.x;
     double dy = y - p.y;
@@ -389,15 +417,23 @@ double Point::distance(const Point& p) const {
 }
 
 double SimilarityTransform::maxCornerDisplacement(double width, double height) const {
-    Point ul{0.f, 0.f};
-    Point ur{width, 0.f};
-    Point ll{0.f, height};
-    Point lr{width, height};
+    // Compute center of the image. Corners will be rotated about this point.
+    double cx = width  * 0.5;
+    double cy = height * 0.5;
 
-    // Find max displacement in any direction of any corner
-    double max_dx = std::max(warp(ul).distance(ul), warp(ur).distance(ur));
-    double max_dy = std::max(warp(ll).distance(ll), warp(lr).distance(lr));
-    return std::max(max_dx, max_dy);
+    Point ul{0.0,    0.0};
+    Point ur{width,  0.0};
+    Point ll{0.0,    height};
+    Point lr{width,  height};
+
+    // Find the maximum distance any corner moves.
+    double max_d = 0.0;
+    max_d = std::max(max_d, warp(ul, cx, cy).distance(ul));
+    max_d = std::max(max_d, warp(ur, cx, cy).distance(ur));
+    max_d = std::max(max_d, warp(ll, cx, cy).distance(ll));
+    max_d = std::max(max_d, warp(lr, cx, cy).distance(lr));
+
+    return max_d;
 }
 
 /**
@@ -418,9 +454,16 @@ cv::Mat warpBySimilarityTransform(const cv::Mat& src, const SimilarityTransform&
     //
     // Because warpAffine() by default expects an inverse mapping,
     // we will enable the WARP_INVERSE_MAP flag below so it interprets M as forward.
+    // Convert (TX,TY) from center-based to origin-based for warpAffine.
+    double cx = (src.cols - 1) * 0.5;
+    double cy = (src.rows - 1) * 0.5;
+
+    double tx_ul = transform.TX - transform.A * cx + transform.B * cy;
+    double ty_ul = transform.TY - transform.B * cx - transform.A * cy;
+
     cv::Mat M = (cv::Mat_<double>(2, 3) <<
-                 1.0 + transform.A,  -transform.B,    transform.TX,
-                 transform.B,        1.0 + transform.A, transform.TY);
+                 1.0 + transform.A,  -transform.B,    tx_ul,
+                 transform.B,        1.0 + transform.A, ty_ul);
 
     cv::Mat dst;
     // Use the same size as the source for the output. Adjust as needed.

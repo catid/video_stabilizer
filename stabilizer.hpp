@@ -15,7 +15,7 @@ struct VideoStabilizerParams {
 
     // Lag: number of frames to delay before smoothing
     int lag = 3;
-    int smoother_memory = 8;
+    int smoother_memory = 5;
     double lambda = 10.0;
 
     // Enable smoother: if false, just use the aligner

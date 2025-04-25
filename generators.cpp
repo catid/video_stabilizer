@@ -348,22 +348,40 @@ public:
         Expr ix1 = min(local_max_y(x, y, 0), grad_x.width() - 1);
         Expr iy1 = min(local_max_y(x, y, 1), grad_x.height() - 1);
 
-        Expr scale = 1.f / grad_x.width();
+        // Center of rotation (in pixel coordinates)
+        Expr cx = cast<float>(grad_x.width())  * 0.5f;
+        Expr cy = cast<float>(grad_x.height()) * 0.5f;
 
-        // Sparse pixels selected based on grad_x should only use grad_x in calculation
+        Expr scale = 1.f / cast<float>(grad_x.width()); // normalize by width
+
+        // Offsets from center
+        Expr u0 = cast<float>(ix0) - cx;
+        Expr v0 = cast<float>(iy0) - cy;
+        Expr u1 = cast<float>(ix1) - cx;
+        Expr v1 = cast<float>(iy1) - cy;
+
+        // Jacobian for pixels chosen from grad_x (dominant x-gradient):
+        //   dI/dA ≈ grad_x * u
+        //   dI/dB ≈ grad_x * (-v)
+        //   dI/dTX ≈ grad_x
+        //   dI/dTY ≈ 0 (ignore grad_y component here)
         output_x(x, y, c) = mux(c, {
-            2.f * grad_x(ix0, iy0) * ix0 * scale,
-            2.f * grad_x(ix0, iy0) * -iy0 * scale,
-            2.f * grad_x(ix0, iy0),
-            0.f,
+            2.f * grad_x(ix0, iy0) * u0 * scale,   // dI/dA
+            2.f * grad_x(ix0, iy0) * (-v0) * scale, // dI/dB
+            2.f * grad_x(ix0, iy0),                 // dI/dTX
+            0.f,                                    // dI/dTY
         });
 
-        // Sparse pixels selected based on grad_y should only use grad_y in calculation
+        // Jacobian for pixels chosen from grad_y (dominant y-gradient):
+        //   dI/dA ≈ grad_y * v
+        //   dI/dB ≈ grad_y * u
+        //   dI/dTX ≈ 0
+        //   dI/dTY ≈ grad_y
         output_y(x, y, c) = mux(c, {
-            2.f * grad_y(ix1, iy1) * iy1 * scale,
-            2.f * grad_y(ix1, iy1) * ix1 * scale,
-            0.f,
-            2.f * grad_y(ix1, iy1),
+            2.f * grad_y(ix1, iy1) * v1 * scale,    // dI/dA
+            2.f * grad_y(ix1, iy1) * u1 * scale,    // dI/dB
+            0.f,                                    // dI/dTX
+            2.f * grad_y(ix1, iy1),                 // dI/dTY
         });
     }
 

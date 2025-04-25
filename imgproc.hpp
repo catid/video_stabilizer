@@ -49,6 +49,13 @@ struct SimilarityTransform {
     SimilarityTransform inverse() const;
 
     Point warp(Point p) const;
+
+    // Warp a point around an explicit center (cx, cy). This treats the
+    // similarity transform parameters (A, B, TX, TY) as operating around
+    // the provided center of rotation rather than the upper-left origin.
+    // When (cx, cy) = (0, 0) this is identical to the original definition
+    // used by warp(p).
+    Point warp(Point p, double cx, double cy) const;
     double maxCornerDisplacement(double width, double height) const;
 
     // "this" = T1, param = T2

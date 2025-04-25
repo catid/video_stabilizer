@@ -16,14 +16,14 @@ struct VideoAlignerParams {
         Too low: Will iterate too many times, accumulating errors until it diverges.
         Too high: Will iterate too few times, creating visual errors and/or diverging more.
     */
-    double threshold = 0.03;
+    double threshold = 0.02;
 
     /*
         The smallest fraction of the image to use for the sparse set.
         Too small: Will not find enough keypoints to do a good alignment.
         Too large: Will accept too many false positives, and may not converge.
     */
-    float smallest_fraction = 0.5f;
+    float smallest_fraction = 0.8f;
 
     /*
         The maximum number of iterations to run before giving up at each level.
@@ -37,7 +37,7 @@ struct VideoAlignerParams {
     int pyramid_min_height = 20;
 
     // Maximum converged displacement in pixels at any pyramid level
-    double max_displacement = 8.0;
+    double max_displacement = 10.0;
 };
 
 /*

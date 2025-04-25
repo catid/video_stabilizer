@@ -584,10 +584,13 @@ bool VideoAligner::AlignNextFrame(
 
         int iterations_performed = 0;
 
-        auto ul0 = transform.warp(Point{0.f, 0.f});
-        auto ur0 = transform.warp(Point{image_width - 1.f, 0.f});
-        auto ll0 = transform.warp(Point{0.f, image_height - 1.f});
-        auto lr0 = transform.warp(Point{image_width - 1.f, image_height - 1.f});
+        double cx_img = image_width  * 0.5;
+        double cy_img = image_height * 0.5;
+
+        auto ul0 = transform.warp(Point{0.f, 0.f},                    cx_img, cy_img);
+        auto ur0 = transform.warp(Point{image_width - 1.f, 0.f},      cx_img, cy_img);
+        auto ll0 = transform.warp(Point{0.f, image_height - 1.f},     cx_img, cy_img);
+        auto lr0 = transform.warp(Point{image_width - 1.f, image_height - 1.f}, cx_img, cy_img);
 
         auto ul1 = ul0;
         auto ur1 = ur0;
@@ -636,10 +639,10 @@ bool VideoAligner::AlignNextFrame(
                 transform = delta_transform.compose(transform);
             }
 
-            auto ul2 = transform.warp(Point{0.f, 0.f});
-            auto ur2 = transform.warp(Point{image_width - 1.f, 0.f});
-            auto ll2 = transform.warp(Point{0.f, image_height - 1.f});
-            auto lr2 = transform.warp(Point{image_width - 1.f, image_height - 1.f});
+            auto ul2 = transform.warp(Point{0.f, 0.f},                    cx_img, cy_img);
+            auto ur2 = transform.warp(Point{image_width - 1.f, 0.f},      cx_img, cy_img);
+            auto ll2 = transform.warp(Point{0.f, image_height - 1.f},     cx_img, cy_img);
+            auto lr2 = transform.warp(Point{image_width - 1.f, image_height - 1.f}, cx_img, cy_img);
 
             double ud12 = std::max(ul2.distance(ul1), ur2.distance(ur1));
             double ld12 = std::max(ll2.distance(ll1), lr2.distance(lr1));
@@ -697,6 +700,5 @@ bool VideoAligner::AlignNextFrame(
         PerformanceMetrics::getInstance().printAllMetrics();
     }
 #endif
-    
     return true;
 }

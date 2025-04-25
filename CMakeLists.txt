@@ -293,3 +293,36 @@ target_link_libraries(video_test
     imgproc
 )
 install(TARGETS video_test DESTINATION bin)
+
+# -----------------------------------------------------------------------------
+# Tool: eval_jitter  (computes frame-to-frame jitter of a video)
+# -----------------------------------------------------------------------------
+
+add_executable(eval_jitter
+    eval_jitter.cpp
+)
+target_link_libraries(eval_jitter
+    imgproc
+)
+install(TARGETS eval_jitter DESTINATION bin)
+
+# -----------------------------------------------------------------------------
+# Tool: grid_search_smoother  (hyper-parameter tuner)
+# -----------------------------------------------------------------------------
+
+add_executable(grid_search_smoother
+    grid_search_smoother.cpp
+)
+target_link_libraries(grid_search_smoother
+    imgproc
+)
+install(TARGETS grid_search_smoother DESTINATION bin)
+
+# Tool: grid_search_align (aligner parameter tuner)
+add_executable(grid_search_align
+    grid_search_align.cpp
+)
+target_link_libraries(grid_search_align
+    imgproc
+)
+install(TARGETS grid_search_align DESTINATION bin)
