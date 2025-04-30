@@ -18,6 +18,9 @@ cv::Mat VideoStabilizer::processFrame(const cv::Mat& inputFrame)
     SimilarityTransform currentMeas;
     bool success = aligner.AlignNextFrame(inputFrame, currentMeas, m_params.aligner);
 
+    // Ignore zoom?
+    //currentMeas.A = 0.0;
+
 #if 0
     if (!success) {
         std::cout << "Alignment failed for frame " << m_frameIndex << std::endl;
